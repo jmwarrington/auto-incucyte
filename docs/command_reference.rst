@@ -7,6 +7,17 @@ Show the exact reference for the installed version:
 
    auto-incucyte --help
 
+Maintenance
+-----------
+
+``--update``
+   Download and install the newest release from the official GitHub repository
+   into the currently active Python environment, then exit. No metadata or
+   plate files are needed.
+
+``--version``
+   Print the installed auto-incucyte version and exit.
+
 Input and output
 ----------------
 

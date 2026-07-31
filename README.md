@@ -80,6 +80,27 @@ source automate/bin/activate
 
 To turn the environment off, run `deactivate`.
 
+### 5. Update later with one command
+
+With the `automate` environment activated, run:
+
+```bash
+auto-incucyte --update
+auto-incucyte --version
+```
+
+The first command downloads and installs the newest release from the official
+GitHub repository. The second confirms the installed version. No metadata or
+plate files are needed when updating.
+
+If an older installation does not recognize `--update`, update it once with the
+standard Python command below. Future updates can use the shorter command.
+
+```bash
+python -m pip install --upgrade \
+  'git+https://github.com/jmwarrington/auto-incucyte.git'
+```
+
 ## The simplest analysis
 
 Create a metadata CSV with one row per measured well:

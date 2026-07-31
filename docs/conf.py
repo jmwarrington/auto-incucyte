@@ -11,7 +11,7 @@ project = "auto-incucyte"
 author = "J. M. Warrington"
 copyright = "2026, J. M. Warrington"
 version = "0.3"
-release = "0.2.0"
+release = "0.3.1"
 
 extensions = [
     "sphinx.ext.autodoc",

@@ -68,7 +68,26 @@ Run ``deactivate`` when finished.
 Updating
 --------
 
-From the cloned project folder with ``automate`` activated:
+With ``automate`` activated, the beginner-friendly update command is:
+
+.. code-block:: console
+
+   auto-incucyte --update
+   auto-incucyte --version
+
+The update comes from the official ``jmwarrington/auto-incucyte`` GitHub
+repository and is installed into the currently active Python environment. No
+metadata or plate arguments are needed.
+
+An installation older than version 0.3.1 will not recognize ``--update``. Use
+the standard Python command once, after which the shortcut is available:
+
+.. code-block:: console
+
+   python -m pip install --upgrade \
+     'git+https://github.com/jmwarrington/auto-incucyte.git'
+
+Developers who also want to update the files in a cloned repository can use:
 
 .. code-block:: console
 

@@ -16,6 +16,8 @@ import glob
 import math
 import re
 import statistics
+import subprocess
+import sys
 import warnings
 from collections import Counter, defaultdict
 from datetime import datetime
@@ -31,7 +33,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-SCRIPT_VERSION = "0.3.0"
+SCRIPT_VERSION = "0.3.1"
+PACKAGE_GITHUB_URL = "https://github.com/jmwarrington/auto-incucyte.git"
 BASELINE_ATOL = 1e-9
 NORMALIZED_COLUMN = "fold_change"
 PLOT_MEAN_COLUMN = "mean_fold_change"
@@ -1661,14 +1664,27 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
         description="Analyze raw Incucyte exports and create normalized plots and tables.",
     )
     parser.add_argument(
+        "--update",
+        action="store_true",
+        help=(
+            "Update auto-incucyte from its official GitHub repository in the "
+            "currently active Python environment, then exit"
+        ),
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {SCRIPT_VERSION}",
+    )
+    parser.add_argument(
         "--metadata",
-        required=True,
         type=Path,
+        default=None,
         help="CSV containing well, sample, and plate columns",
     )
     parser.add_argument(
         "plates",
-        nargs="+",
+        nargs="*",
         help=(
             "Plate export inputs. For one metadata plate, supply a bare file path. "
             "For multiple plates, map each plate explicitly as PLATE=FILE, for "
@@ -1847,8 +1863,39 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
     return parser
 
 
+def update_package() -> int:
+    """Update this package from its official repository in the active environment."""
+    command = [
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--upgrade",
+        f"git+{PACKAGE_GITHUB_URL}",
+    ]
+    print(f"Current auto-incucyte version: {SCRIPT_VERSION}")
+    print("Downloading and installing the newest auto-incucyte release from GitHub...")
+    completed = subprocess.run(command, check=False)
+    if completed.returncode == 0:
+        print("Update complete. Confirm the installed version with: auto-incucyte --version")
+    else:
+        print(
+            "Update failed. Check the internet connection and confirm that the "
+            "'automate' environment is activated, then try again."
+        )
+    return completed.returncode
+
+
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
-    args = build_parser(prog).parse_args(argv)
+    parser = build_parser(prog)
+    args = parser.parse_args(argv)
+
+    if args.update:
+        return update_package()
+    if args.metadata is None:
+        parser.error("--metadata is required unless --update or --version is used")
+    if not args.plates:
+        parser.error("at least one plate export file is required")
 
     if args.group_size is not None and args.group_size < 1:
         raise ValueError("--group-size must be at least 1")

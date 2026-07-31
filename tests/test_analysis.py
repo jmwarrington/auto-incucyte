@@ -1,9 +1,11 @@
 import csv
 import os
+import sys
 import tempfile
 import unittest
 import warnings
 from pathlib import Path
+from unittest import mock
 
 os.environ.setdefault("MPLCONFIGDIR", str(Path(tempfile.gettempdir()) / "auto_incucyte_mpl"))
 
@@ -31,6 +33,23 @@ from auto_incucyte.analysis import (
 
 
 class AnalysisTests(unittest.TestCase):
+    def test_update_uses_active_python_and_official_github_repository(self):
+        completed = mock.Mock(returncode=0)
+        with mock.patch(
+            "auto_incucyte.analysis.subprocess.run", return_value=completed
+        ) as run:
+            status = main(["--update"], prog="auto-incucyte")
+        command = run.call_args.args[0]
+        self.assertEqual(status, 0)
+        self.assertEqual(
+            command[:5], [sys.executable, "-m", "pip", "install", "--upgrade"]
+        )
+        self.assertEqual(
+            command[5],
+            "git+https://github.com/jmwarrington/auto-incucyte.git",
+        )
+        self.assertEqual(run.call_args.kwargs, {"check": False})
+
     def test_default_is_one_plot_with_every_sequence_and_control(self):
         definitions = default_plot_definitions(
             ["Sequence Alpha", "Sequence Beta", "Wild Type Control"],
