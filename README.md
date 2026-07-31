@@ -9,99 +9,169 @@ Each physical well is divided by its own measurement at the selected baseline
 hour. Replicate fold changes are then averaged at each time point and plotted as
 mean ± SEM.
 
-## First-time setup for someone new to coding
+## START HERE: choose your computer
 
-### 1. Open Terminal and download the project
+Follow **only one** setup section:
 
-On a Mac, open **Terminal** from Applications → Utilities. Copy and paste these
-two commands one at a time:
+- **Mac users:** follow “Mac setup” immediately below.
+- **Windows PC users:** skip to “Windows PC setup.”
+
+Do not mix Mac and Windows activation commands. Both sections create a private
+Python environment named `automate`. This is only a folder containing the
+packages required by auto-incucyte; it does not alter experimental data.
+
+## Mac setup
+
+### Mac 1: open Terminal and download auto-incucyte
+
+Open **Terminal** from Applications → Utilities. Copy one line at a time:
 
 ```bash
 git clone https://github.com/jmwarrington/auto-incucyte.git
 cd auto-incucyte
 ```
 
-The second command moves Terminal into the downloaded project folder.
+If `git` is not found, install Git from [git-scm.com](https://git-scm.com/download/mac),
+then reopen Terminal and try again.
 
-### 2. Check Python
+### Mac 2: confirm Python 3.10 or newer
 
 ```bash
 python3 --version
 ```
 
-The result must be Python 3.10 or newer. Python 3.11, 3.12, 3.13, and 3.14 are
-also supported. If the command shows Python 3.9, but Miniconda is installed, use
-this Python for the next step:
+Continue if this reports Python 3.10, 3.11, 3.12, 3.13, or 3.14. If it reports
+Python 3.9 and Miniconda is installed, check its newer Python:
 
 ```bash
 /opt/miniconda3/bin/python3.13 --version
 ```
 
-### 3. Create a private Python environment
+### Mac 3: create and activate `automate`
 
-A virtual environment is simply a private folder containing the Python tools
-for this program. Creating it does not modify experimental data.
-
-If `python3 --version` showed 3.10 or newer:
+If `python3 --version` reported 3.10 or newer:
 
 ```bash
 python3 -m venv automate
-```
-
-If the Mac's `python3` was 3.9 and the Miniconda command worked:
-
-```bash
-/opt/miniconda3/bin/python3.13 -m venv automate
-```
-
-Turn the environment on:
-
-```bash
 source automate/bin/activate
 ```
 
-The word `(automate)` should appear at the beginning of the Terminal prompt.
-Now install the program:
+If the Mac Python was 3.9 but Miniconda Python 3.13 worked:
+
+```bash
+/opt/miniconda3/bin/python3.13 -m venv automate
+source automate/bin/activate
+```
+
+The Terminal prompt should now begin with `(automate)`.
+
+### Mac 4: install and check auto-incucyte
 
 ```bash
 python -m pip install --upgrade pip
 python -m pip install .
+auto-incucyte --version
 auto-incucyte --help
 ```
 
-### 4. Use it again later
-
-Each time a new Terminal window is opened:
+### Mac: activate it again in a new Terminal window
 
 ```bash
 cd auto-incucyte
 source automate/bin/activate
 ```
 
-To turn the environment off, run `deactivate`.
+Run `deactivate` when finished.
 
-### 5. Update later with one command
+## Windows PC setup
 
-With the `automate` environment activated, run:
+These instructions use **PowerShell**, which is included with Windows.
 
-```bash
+### Windows 1: install the two prerequisites
+
+1. Install Python 3.10 or newer from [python.org](https://www.python.org/downloads/windows/).
+   During installation, select **Add python.exe to PATH** if that option appears.
+2. Install Git for Windows from [git-scm.com](https://git-scm.com/download/win).
+3. Close and reopen PowerShell after installing them.
+
+### Windows 2: open PowerShell and download auto-incucyte
+
+Open the Start menu, type **PowerShell**, and open **Windows PowerShell**. Copy
+one line at a time:
+
+```powershell
+git clone https://github.com/jmwarrington/auto-incucyte.git
+cd auto-incucyte
+```
+
+### Windows 3: confirm Python 3.10 or newer
+
+```powershell
+py --version
+```
+
+Continue only if this reports Python 3.10 or newer.
+
+### Windows 4: create and activate `automate`
+
+```powershell
+py -m venv automate
+.\automate\Scripts\Activate.ps1
+```
+
+The PowerShell prompt should now begin with `(automate)`.
+
+If PowerShell says that running scripts is disabled, run these two commands.
+The first change applies only to the current PowerShell window:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\automate\Scripts\Activate.ps1
+```
+
+### Windows 5: install and check auto-incucyte
+
+```powershell
+python -m pip install --upgrade pip
+python -m pip install .
+auto-incucyte --version
+auto-incucyte --help
+```
+
+### Windows: activate it again in a new PowerShell window
+
+```powershell
+cd auto-incucyte
+.\automate\Scripts\Activate.ps1
+```
+
+If script activation is blocked again, use the temporary `Set-ExecutionPolicy`
+command above. Run `deactivate` when finished.
+
+## Updating on either Mac or Windows
+
+First activate `automate` using the command for your computer. Then run:
+
+```text
 auto-incucyte --update
 auto-incucyte --version
 ```
 
-The first command downloads and installs the newest release from the official
-GitHub repository. The second confirms the installed version. No metadata or
-plate files are needed when updating.
+The first command installs the newest release from the official GitHub
+repository. The second confirms the installed version. No metadata or plate
+files are needed.
 
-If an older installation does not recognize `--update`, update it once with the
-standard Python command below. Future updates can use the shorter command.
+If an old installation does not recognize `--update`, run this standard command
+once. It works in both Mac Terminal and Windows PowerShell:
 
-```bash
-python -m pip install --upgrade \
-  'git+https://github.com/jmwarrington/auto-incucyte.git'
+```text
+python -m pip install --upgrade "git+https://github.com/jmwarrington/auto-incucyte.git"
 ```
 
 ## The simplest analysis
+
+All analysis commands below are written on one line so they work unchanged in
+both Mac Terminal and Windows PowerShell.
 
 Create a metadata CSV with one row per measured well:
 
@@ -115,25 +185,20 @@ A4,WT,1
 
 Then run:
 
-```bash
-auto-incucyte \
-  --metadata 'plate metadata.csv' \
-  'raw plate 1.txt' \
-  --controls 'WT' \
-  --baseline-hour 0 \
-  --output 'incucyte_results_experiment_1'
+```text
+auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' --controls 'WT' --baseline-hour 0 --output 'incucyte_results_experiment_1'
 ```
 
 Quotation marks are important whenever a path or a name contains spaces. For a
 list of controls, quote the **entire comma-separated list**:
 
-```bash
+```text
 --controls 'WT, Shuffle'
 ```
 
 Use this when there are no controls:
 
-```bash
+```text
 --controls ''
 ```
 
@@ -142,12 +207,8 @@ regard to capitalization, and sample names containing spaces are supported.
 
 For multiple plates, label each plate file explicitly:
 
-```bash
-auto-incucyte \
-  --metadata 'plate metadata.csv' \
-  '1=raw plate 1.txt' '2=raw plate 2.txt' \
-  --controls 'WT, Shuffle' \
-  --output 'incucyte_results_experiment_1'
+```text
+auto-incucyte --metadata 'plate metadata.csv' '1=raw plate 1.txt' '2=raw plate 2.txt' --controls 'WT, Shuffle' --output 'incucyte_results_experiment_1'
 ```
 
 Native tab-delimited `.txt` and `.tsv` exports are supported, as are legacy
@@ -162,7 +223,7 @@ alone.
 
 For the cleanest record, give each run a clear new folder:
 
-```bash
+```text
 --output 'incucyte_results_2026-07-31_CD28_screen'
 ```
 
@@ -176,9 +237,8 @@ linear and log2 version are created.
 `--group-size` adds smaller graphs but never replaces the complete graph. This
 command creates `All sequences`, `Group 1`, `Group 2`, and so on:
 
-```bash
-auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' \
-  --controls 'WT, Shuffle' --group-size 5 --output 'grouped_results'
+```text
+auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' --controls 'WT, Shuffle' --group-size 5 --output 'grouped_results'
 ```
 
 Controls are repeated on every automatic group plot.
@@ -188,25 +248,22 @@ Controls are repeated on every automatic group plot.
 Quote one comma-separated list. These hours are removed from normalized tables
 and all plots; the original reshaped raw-data tables still retain them:
 
-```bash
-auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' \
-  --drop-time '22, 55' --output 'filtered_results'
+```text
+auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' --drop-time '22, 55' --output 'filtered_results'
 ```
 
 The normalization baseline cannot be dropped. The option may be repeated:
 
-```bash
-auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' \
-  --drop-time '22, 55' --drop-time '72' --output 'filtered_results'
+```text
+auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' --drop-time '22, 55' --drop-time '72' --output 'filtered_results'
 ```
 
 ### Hide samples from every plot
 
 Hidden samples remain in all analysis tables but are removed from every graph:
 
-```bash
-auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' \
-  --hide-sample '70, NALM6' --output 'hidden_sample_results'
+```text
+auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' --hide-sample '70, NALM6' --output 'hidden_sample_results'
 ```
 
 Matching is case-insensitive, spaces are supported, and the option may be
@@ -226,9 +283,8 @@ CD28 comparison,CD28 sequence 1,CD28 sequence 2,Wild Type Control,Untransduced C
 Add more rows or columns such as `sequence_3` and `control_3`, save the file,
 then run:
 
-```bash
-auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' \
-  --plot-layout 'my plot layout.csv' --output 'custom_layout_results'
+```text
+auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' --plot-layout 'my plot layout.csv' --output 'custom_layout_results'
 ```
 
 The controls are user-defined for each plot. Sequence, control, and plot names
@@ -251,10 +307,8 @@ Open that file in a spreadsheet. It already contains every plotted sample and
 its default style. Change any value, save it under a descriptive name such as
 `my exact plot styles.csv`, and rerun:
 
-```bash
-auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' \
-  --color-mapping-metadata 'my exact plot styles.csv' \
-  --output 'custom_style_results'
+```text
+auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' --color-mapping-metadata 'my exact plot styles.csv' --output 'custom_style_results'
 ```
 
 Example:
@@ -285,9 +339,8 @@ The program validates the spreadsheet and writes the exact final choices to
 For fast palette changes without a spreadsheet, keep using any installed
 Matplotlib color map. The default remains `plasma`:
 
-```bash
-auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' \
-  --cmap viridis --output 'viridis_results'
+```text
+auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' --cmap viridis --output 'viridis_results'
 ```
 
 Common choices include `magma`, `inferno`, `cividis`, `turbo`, and `tab10`.
@@ -297,9 +350,8 @@ Common choices include `magma`, `inferno`, `cividis`, `turbo`, and `tab10`.
 The font must be installed on the computer. Names containing spaces must be
 quoted:
 
-```bash
-auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' \
-  --font 'Avenir' --font-size 12 --output 'avenir_results'
+```text
+auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' --font 'Avenir' --font-size 12 --output 'avenir_results'
 ```
 
 Replace `'Avenir'` with `'Arial'` or `'Times New Roman'` to use either of those
@@ -307,22 +359,14 @@ fonts when it is installed.
 
 `--font-size` changes the overall scale. Each part can be set precisely:
 
-```bash
-auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' \
-  --font 'Arial' \
-  --title-font-size 16 \
-  --axis-font-size 13 \
-  --tick-font-size 11 \
-  --legend-font-size 10 \
-  --output 'font_customized_results'
+```text
+auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' --font 'Arial' --title-font-size 16 --axis-font-size 13 --tick-font-size 11 --legend-font-size 10 --output 'font_customized_results'
 ```
 
 ### Legend position and columns
 
-```bash
-auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' \
-  --legend-location 'upper left' --legend-columns 1 \
-  --output 'legend_customized_results'
+```text
+auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' --legend-location 'upper left' --legend-columns 1 --output 'legend_customized_results'
 ```
 
 Locations are `best`, `upper right`, `upper left`, `lower left`, `lower right`,
@@ -331,26 +375,16 @@ Locations are `best`, `upper right`, `upper left`, `lower left`, `lower right`,
 
 ### Axis spine thickness
 
-```bash
-auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' \
-  --x-axis-linewidth 2 --y-axis-linewidth 2.5 \
-  --output 'axis_customized_results'
+```text
+auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' --x-axis-linewidth 2 --y-axis-linewidth 2.5 --output 'axis_customized_results'
 ```
 
 ### Horizontal reference lines
 
 Use one flag per line. Linear and log2 plots have separate line positions:
 
-```bash
-auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' \
-  --h-line 2 \
-  --h-line 3 \
-  --log2-h-line 1 \
-  --h-line-color '#555555' \
-  --h-line-style='--' \
-  --h-line-width 1.5 \
-  --h-line-alpha 0.7 \
-  --output 'reference_line_results'
+```text
+auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' --h-line 2 --h-line 3 --log2-h-line 1 --h-line-color '#555555' --h-line-style='--' --h-line-width 1.5 --h-line-alpha 0.7 --output 'reference_line_results'
 ```
 
 ## Results
@@ -382,16 +416,8 @@ Matplotlib.
 
 The repository includes synthetic, non-experimental data:
 
-```bash
-auto-incucyte \
-  --metadata 'examples/plate_metadata.csv' \
-  'examples/plate_1.txt' \
-  --controls 'WT, Vehicle' \
-  --baseline-hour 0 \
-  --drop-time '2' \
-  --font 'DejaVu Sans' \
-  --legend-location 'upper left' \
-  --output 'example_results_customized'
+```text
+auto-incucyte --metadata 'examples/plate_metadata.csv' 'examples/plate_1.txt' --controls 'WT, Vehicle' --baseline-hour 0 --drop-time '2' --font 'DejaVu Sans' --legend-location 'upper left' --output 'example_results_customized'
 ```
 
 It also includes `examples/color_mapping_metadata.csv`, which can be supplied
