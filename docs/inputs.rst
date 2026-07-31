@@ -73,7 +73,11 @@ If the reshaped data contains more than one nonblank metric, select exactly one:
 
 .. code-block:: console
 
-   auto-incucyte ... --metric "Total green object area"
+   auto-incucyte \
+     --metadata 'plate metadata.csv' \
+     'raw plate 1.txt' \
+     --metric 'Total green object area' \
+     --output 'green_area_results'
 
 Plot-layout CSV
 ---------------
@@ -91,3 +95,38 @@ appear on each one. Start from the automatically generated
 ``control_1``, ``control_2``, ...
    Control names for this specific plot. Repeat the same names on multiple rows
    when those controls should appear on multiple plots.
+
+Color-mapping metadata CSV
+--------------------------
+
+This optional second spreadsheet gives precise control over each sample's
+appearance. Start from the generated
+``tables/color_mapping_metadata_template.csv``. It contains these columns:
+
+.. code-block:: text
+
+   sample,color,marker,linestyle,linewidth,markersize,markeredgewidth,zorder,legend_label
+   CD28 sequence 1,#2A6FDB,o,-,2.5,7,1,5,CD28-1
+   Wild Type Control,black,s,-,2.5,7,1,10,WT
+
+``sample``
+   Name from the plate metadata. Spaces are supported and matching is
+   case-insensitive.
+
+``color``
+   Named color or exact hex code.
+
+``marker`` and ``linestyle``
+   Point shape and line pattern. Common markers are ``o``, ``s``, ``^``, ``D``,
+   ``X``, and ``P``. Common line styles are ``-``, ``--``, ``:``, and ``-.``.
+
+``linewidth``, ``markersize``, and ``markeredgewidth``
+   Non-negative numeric sizes.
+
+``zorder``
+   Drawing order. Larger values appear on top.
+
+``legend_label``
+   Optional display label; the metadata sample name remains the data identity.
+
+Pass the edited file with ``--color-mapping-metadata``.

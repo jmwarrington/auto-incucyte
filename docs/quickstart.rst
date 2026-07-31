@@ -14,7 +14,7 @@ From the repository root:
    auto-incucyte \
      --metadata examples/plate_metadata.csv \
      examples/plate_1.txt \
-     --controls WT,Vehicle \
+     --controls 'WT, Vehicle' \
      --baseline-hour 0 \
      --output example_results
 
@@ -45,6 +45,10 @@ drawn, and the third verifies the baseline calculation.
 The default figure contains every line. To create several named figures, open
 ``example_results/tables/plot_layout_template.csv``, duplicate or edit its rows,
 and rerun with ``--plot-layout``.
+
+If ``example_results`` already exists, the program warns before overwriting
+matching generated filenames and never deletes unrelated files. Choose a new,
+descriptive output name to preserve separate runs.
 
 4. Substitute your own data
 ---------------------------

@@ -1,74 +1,338 @@
 # auto-incucyte
 
-`auto-incucyte` turns native Incucyte TXT/TSV exports into clean tables, linear
-fold-change plots, log2 fold-change plots, and a normalization audit in one run.
+`auto-incucyte` turns native Incucyte TXT/TSV exports into clean data tables,
+linear fold-change plots, log2 fold-change plots, and a normalization audit.
+It is simple by default and highly customizable when publication-ready styling
+is needed.
 
 Each physical well is divided by its own measurement at the selected baseline
 hour. Replicate fold changes are then averaged at each time point and plotted as
 mean ± SEM.
 
-## Documentation
+## First-time setup for someone new to coding
 
-The full user guide is in [`docs/`](docs/index.rst), with installation,
-input preparation, normalization details, worked examples, output
-interpretation, troubleshooting, and API reference. The repository includes
-everything needed to publish it at Read the Docs; see
-[`docs/readthedocs.rst`](docs/readthedocs.rst) for the one-time online setup.
+### 1. Open Terminal and download the project
 
-## Install
+On a Mac, open **Terminal** from Applications → Utilities. Copy and paste these
+two commands one at a time:
 
 ```bash
 git clone https://github.com/jmwarrington/auto-incucyte.git
 cd auto-incucyte
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install .
 ```
 
-Confirm the installation:
+The second command moves Terminal into the downloaded project folder.
+
+### 2. Check Python
 
 ```bash
+python3 --version
+```
+
+The result must be Python 3.10 or newer. Python 3.11, 3.12, 3.13, and 3.14 are
+also supported. If the command shows Python 3.9, but Miniconda is installed, use
+this Python for the next step:
+
+```bash
+/opt/miniconda3/bin/python3.13 --version
+```
+
+### 3. Create a private Python environment
+
+A virtual environment is simply a private folder containing the Python tools
+for this program. Creating it does not modify experimental data.
+
+If `python3 --version` showed 3.10 or newer:
+
+```bash
+python3 -m venv automate
+```
+
+If the Mac's `python3` was 3.9 and the Miniconda command worked:
+
+```bash
+/opt/miniconda3/bin/python3.13 -m venv automate
+```
+
+Turn the environment on:
+
+```bash
+source automate/bin/activate
+```
+
+The word `(automate)` should appear at the beginning of the Terminal prompt.
+Now install the program:
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install .
 auto-incucyte --help
 ```
 
-## Quick start
+### 4. Use it again later
+
+Each time a new Terminal window is opened:
+
+```bash
+cd auto-incucyte
+source automate/bin/activate
+```
+
+To turn the environment off, run `deactivate`.
+
+## The simplest analysis
 
 Create a metadata CSV with one row per measured well:
 
 ```csv
 well,sample,plate
-A1,Treatment,1
-A2,Treatment,1
+A1,Treatment Alpha,1
+A2,Treatment Alpha,1
 A3,WT,1
 A4,WT,1
 ```
 
-Analyze one plate and normalize every well to hour 2:
+Then run:
 
 ```bash
 auto-incucyte \
-  --metadata plate_metadata.csv \
-  raw_plate_1.txt \
-  --baseline-hour 2 \
-  --output incucyte_results
+  --metadata 'plate metadata.csv' \
+  'raw plate 1.txt' \
+  --controls 'WT' \
+  --baseline-hour 0 \
+  --output 'incucyte_results_experiment_1'
 ```
 
-When metadata contains multiple plates, label each export explicitly:
+Quotation marks are important whenever a path or a name contains spaces. For a
+list of controls, quote the **entire comma-separated list**:
+
+```bash
+--controls 'WT, Shuffle'
+```
+
+Use this when there are no controls:
+
+```bash
+--controls ''
+```
+
+The default controls are `WT`, `Shuffle`, and `NALM6`. Names are matched without
+regard to capitalization, and sample names containing spaces are supported.
+
+For multiple plates, label each plate file explicitly:
 
 ```bash
 auto-incucyte \
-  --metadata plate_metadata.csv \
-  1=raw_plate_1.txt 2=raw_plate_2.txt \
-  --baseline-hour 0 \
-  --output incucyte_results
+  --metadata 'plate metadata.csv' \
+  '1=raw plate 1.txt' '2=raw plate 2.txt' \
+  --controls 'WT, Shuffle' \
+  --output 'incucyte_results_experiment_1'
 ```
 
 Native tab-delimited `.txt` and `.tsv` exports are supported, as are legacy
 comma-delimited `.csv` copies.
 
-## Results
+## Safe output folders
 
-One output folder contains everything:
+The program never clears an output folder. If the folder already contains
+files, it prints a warning. Files with the same generated filename are
+overwritten, but unrelated files and old plots with different names are left
+alone.
+
+For the cleanest record, give each run a clear new folder:
+
+```bash
+--output 'incucyte_results_2026-07-31_CD28_screen'
+```
+
+## Choose which data appear
+
+### Always make an all-sequences plot
+
+Without extra options, every sequence and control appears on one graph. Both a
+linear and log2 version are created.
+
+`--group-size` adds smaller graphs but never replaces the complete graph. This
+command creates `All sequences`, `Group 1`, `Group 2`, and so on:
+
+```bash
+auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' \
+  --controls 'WT, Shuffle' --group-size 5 --output 'grouped_results'
+```
+
+Controls are repeated on every automatic group plot.
+
+### Drop unwanted time points
+
+Quote one comma-separated list. These hours are removed from normalized tables
+and all plots; the original reshaped raw-data tables still retain them:
+
+```bash
+auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' \
+  --drop-time '22, 55' --output 'filtered_results'
+```
+
+The normalization baseline cannot be dropped. The option may be repeated:
+
+```bash
+auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' \
+  --drop-time '22, 55' --drop-time '72' --output 'filtered_results'
+```
+
+### Hide samples from every plot
+
+Hidden samples remain in all analysis tables but are removed from every graph:
+
+```bash
+auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' \
+  --hide-sample '70, NALM6' --output 'hidden_sample_results'
+```
+
+Matching is case-insensitive, spaces are supported, and the option may be
+repeated.
+
+### Choose exact plot contents and names
+
+Every run creates `tables/plot_layout_template.csv`. Open it in Excel, Numbers,
+or Google Sheets. Each row defines one plot:
+
+```csv
+plot_name,sequence_1,sequence_2,control_1,control_2
+CD28 comparison,CD28 sequence 1,CD28 sequence 2,Wild Type Control,Untransduced Cells
+4-1BB comparison,4-1BB sequence 1,4-1BB sequence 2,Wild Type Control,Untransduced Cells
+```
+
+Add more rows or columns such as `sequence_3` and `control_3`, save the file,
+then run:
+
+```bash
+auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' \
+  --plot-layout 'my plot layout.csv' --output 'custom_layout_results'
+```
+
+The controls are user-defined for each plot. Sequence, control, and plot names
+may contain spaces. Normal CSV quoting supports names containing commas.
+
+## Maximum plot customization
+
+The default `plasma` colors and plot style require no setup. Every major visual
+choice can also be controlled so these figures match the rest of a manuscript.
+
+### Exact colors, shapes, lines, and legend labels
+
+Every run creates:
+
+```text
+tables/color_mapping_metadata_template.csv
+```
+
+Open that file in a spreadsheet. It already contains every plotted sample and
+its default style. Change any value, save it under a descriptive name such as
+`my exact plot styles.csv`, and rerun:
+
+```bash
+auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' \
+  --color-mapping-metadata 'my exact plot styles.csv' \
+  --output 'custom_style_results'
+```
+
+Example:
+
+```csv
+sample,color,marker,linestyle,linewidth,markersize,markeredgewidth,zorder,legend_label
+CD28 sequence 1,#2A6FDB,o,-,2.5,7,1,5,CD28-1
+4-1BB sequence 1,#D1495B,^,--,3,8,1.2,6,4-1BB-1
+Wild Type Control,black,s,-,2.5,7,1,10,WT
+```
+
+The columns mean:
+
+- `sample`: exact sample name from the metadata; spaces are allowed.
+- `color`: a color name such as `navy`, or an exact hex color such as `#2A6FDB`.
+- `marker`: point shape, for example `o` circle, `s` square, `^` triangle, `D`
+  diamond, `X`, or `P`.
+- `linestyle`: `-` solid, `--` dashed, `:` dotted, or `-.` dash-dot.
+- `linewidth`: line thickness.
+- `markersize`: point size.
+- `markeredgewidth`: thickness of the point outline.
+- `zorder`: drawing order; larger numbers are drawn on top.
+- `legend_label`: optional display name in the legend.
+
+The program validates the spreadsheet and writes the exact final choices to
+`tables/color_mapping_metadata_used.csv` for reproducibility.
+
+For fast palette changes without a spreadsheet, keep using any installed
+Matplotlib color map. The default remains `plasma`:
+
+```bash
+auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' \
+  --cmap viridis --output 'viridis_results'
+```
+
+Common choices include `magma`, `inferno`, `cividis`, `turbo`, and `tab10`.
+
+### Font family and font sizes
+
+The font must be installed on the computer. Names containing spaces must be
+quoted:
+
+```bash
+auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' \
+  --font 'Avenir' --font-size 12 --output 'avenir_results'
+```
+
+Replace `'Avenir'` with `'Arial'` or `'Times New Roman'` to use either of those
+fonts when it is installed.
+
+`--font-size` changes the overall scale. Each part can be set precisely:
+
+```bash
+auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' \
+  --font 'Arial' \
+  --title-font-size 16 \
+  --axis-font-size 13 \
+  --tick-font-size 11 \
+  --legend-font-size 10 \
+  --output 'font_customized_results'
+```
+
+### Legend position and columns
+
+```bash
+auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' \
+  --legend-location 'upper left' --legend-columns 1 \
+  --output 'legend_customized_results'
+```
+
+Locations are `best`, `upper right`, `upper left`, `lower left`, `lower right`,
+`right`, `center left`, `center right`, `lower center`, `upper center`, or
+`center`.
+
+### Axis spine thickness
+
+```bash
+auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' \
+  --x-axis-linewidth 2 --y-axis-linewidth 2.5 \
+  --output 'axis_customized_results'
+```
+
+### Horizontal reference lines
+
+Use one flag per line. Linear and log2 plots have separate line positions:
+
+```bash
+auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' \
+  --h-line 2 \
+  --h-line 3 \
+  --log2-h-line 1 \
+  --h-line-color '#555555' \
+  --h-line-style='--' \
+  --h-line-width 1.5 \
+  --h-line-alpha 0.7 \
+  --output 'reference_line_results'
+```
+
+## Results
 
 ```text
 incucyte_results/
@@ -80,78 +344,44 @@ incucyte_results/
 │   ├── incucyte_log2_plot_data.csv
 │   ├── normalization_audit.csv
 │   ├── plot_layout_template.csv
-│   └── plot_layout_used.csv
+│   ├── plot_layout_used.csv
+│   ├── color_mapping_metadata_template.csv
+│   └── color_mapping_metadata_used.csv
 └── plots/
     ├── incucyte_normalized_01_all_sequences.png
     ├── incucyte_log2_01_all_sequences.png
     └── plot_manifest.csv
 ```
 
-The audit table proves that every sample is exactly 1.0 at the baseline on the
+The audit table verifies that every sample is exactly 1.0 at baseline on the
 linear scale. The two plot-data tables contain the exact values sent to
 Matplotlib.
 
-## Plots: simple by default
+## Complete reproducible example
 
-By default, every sequence and control is drawn on one graph. The program writes
-both a linear fold-change version and a log2 version. No plot setup is required.
-
-The default control names are `WT`, `Shuffle`, and `NALM6`. Change them for the
-default graph with a comma-separated list:
-
-```bash
-auto-incucyte ... --controls WT,Vehicle,Untreated
-```
-
-Use `--controls ''` when there are no controls. Experimental samples are split
-from controls only to give controls a stable visual style.
-
-## Choose exactly what appears on each plot
-
-Every run creates `tables/plot_layout_template.csv`. Open it in Excel, Numbers,
-or Google Sheets. Each row is one plot:
-
-```csv
-plot_name,sequence_1,sequence_2,control_1,control_2
-CD28 comparison,CD28 sequence 1,CD28 sequence 2,Wild Type Control,Untransduced Cells
-4-1BB comparison,4-1BB sequence 1,4-1BB sequence 2,Wild Type Control,Untransduced Cells
-```
-
-Add as many rows and `sequence_3`, `control_3`, etc. columns as needed. Control
-names are defined separately for every row, so the same controls can appear on
-all plots or different controls can be used on different plots. Then rerun:
-
-```bash
-auto-incucyte ... --plot-layout "my plot layout.csv"
-```
-
-Sequence names, control names, plot names, and paths may contain spaces. Use the
-same sequence spelling as the metadata CSV; matching is case-insensitive. Normal
-CSV quoting also supports names containing commas.
-
-## Change the color map
-
-The default remains `plasma`. Select any installed Matplotlib color map:
-
-```bash
-auto-incucyte ... --cmap viridis
-```
-
-Other common choices include `magma`, `inferno`, `cividis`, `turbo`, and
-`tab10`.
-
-## Reproducible example
-
-This repository includes synthetic, non-experimental example data:
+The repository includes synthetic, non-experimental data:
 
 ```bash
 auto-incucyte \
-  --metadata examples/plate_metadata.csv \
-  examples/plate_1.txt \
-  --controls WT,Vehicle \
+  --metadata 'examples/plate_metadata.csv' \
+  'examples/plate_1.txt' \
+  --controls 'WT, Vehicle' \
   --baseline-hour 0 \
-  --output example_results
+  --drop-time '2' \
+  --font 'DejaVu Sans' \
+  --legend-location 'upper left' \
+  --output 'example_results_customized'
 ```
+
+It also includes `examples/color_mapping_metadata.csv`, which can be supplied
+with `--color-mapping-metadata` as a working style-spreadsheet example.
+
+## Full online-style documentation
+
+The Read the Docs guide is in [`docs/`](docs/index.rst), including installation,
+input preparation, examples, every command, output interpretation, and
+troubleshooting. [`docs/readthedocs.rst`](docs/readthedocs.rst) explains the
+one-time steps for publishing it at Read the Docs.
 
 ## Development
 

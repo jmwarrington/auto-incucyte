@@ -31,7 +31,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-SCRIPT_VERSION = "0.2.0"
+SCRIPT_VERSION = "0.3.0"
 BASELINE_ATOL = 1e-9
 NORMALIZED_COLUMN = "fold_change"
 PLOT_MEAN_COLUMN = "mean_fold_change"
@@ -60,6 +60,17 @@ CONTROL_STYLE: dict[str, dict[str, Any]] = {
 }
 
 EXPERIMENTAL_MARKERS = ["D", "p", "X", "P", "h"]
+STYLE_METADATA_FIELDS = [
+    "sample",
+    "color",
+    "marker",
+    "linestyle",
+    "linewidth",
+    "markersize",
+    "markeredgewidth",
+    "zorder",
+    "legend_label",
+]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -538,15 +549,31 @@ def canonical_sample(value: object) -> str:
     return CONTROL_ALIASES.get(key, text)
 
 
-def set_avenir_font() -> str:
-    """Use Avenir when installed, otherwise fall back without repeated warnings."""
+def set_plot_font(requested: str | None) -> str:
+    """Select an installed font by name while preserving the original default."""
     available = {font.name for font in mpl.font_manager.fontManager.ttflist}
-    if "Avenir" in available:
-        first_choice = "Avenir"
+    available_by_case = {name.casefold(): name for name in available}
+    generic_families = {"sans-serif", "serif", "monospace", "cursive", "fantasy"}
+
+    if requested:
+        cleaned = clean(requested)
+        generic = cleaned.casefold()
+        if generic in generic_families:
+            selected = generic
+        else:
+            selected = available_by_case.get(generic)
+            if selected is None:
+                examples = "Avenir, Arial, Times New Roman, DejaVu Sans"
+                raise ValueError(
+                    f"Font {requested!r} is not installed on this computer. "
+                    f"Examples of commonly installed fonts: {examples}."
+                )
+    elif "Avenir" in available:
+        selected = "Avenir"
     elif "Avenir Next" in available:
-        first_choice = "Avenir Next"
+        selected = "Avenir Next"
     else:
-        first_choice = "DejaVu Sans"
+        selected = "DejaVu Sans"
         warnings.warn(
             "Avenir/Avenir Next is not installed; using DejaVu Sans.",
             stacklevel=2,
@@ -554,14 +581,13 @@ def set_avenir_font() -> str:
 
     mpl.rcParams.update(
         {
-            "font.family": "sans-serif",
-            "font.sans-serif": [first_choice, "Avenir", "Avenir Next", "DejaVu Sans"],
+            "font.family": selected,
             "axes.spines.top": False,
             "axes.spines.right": False,
             "axes.linewidth": 1.0,
         }
     )
-    return first_choice
+    return selected
 
 
 def nonblank_text(series: pd.Series) -> pd.Series:
@@ -888,6 +914,71 @@ def parse_controls(value: str) -> list[str]:
     return list(dict.fromkeys(names))
 
 
+def parse_comma_options(values: list[str] | None) -> list[str]:
+    """Combine repeatable comma-separated command-line values."""
+    if not values:
+        return []
+    return list(
+        dict.fromkeys(
+            clean(item)
+            for value in values
+            for item in value.split(",")
+            if clean(item)
+        )
+    )
+
+
+def parse_drop_times(values: list[str] | None) -> list[float]:
+    """Parse repeatable comma-separated time points."""
+    times: list[float] = []
+    for item in parse_comma_options(values):
+        try:
+            time = float(item)
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid time {item!r} in --drop-time. Use numbers such as "
+                "--drop-time '22, 55'."
+            ) from exc
+        if not math.isfinite(time):
+            raise ValueError("--drop-time values must be finite numbers")
+        if time not in times:
+            times.append(time)
+    return times
+
+
+def drop_time_points(
+    raw: pd.DataFrame, times: list[float], baseline_hour: float
+) -> pd.DataFrame:
+    """Remove requested time points while protecting the normalization baseline."""
+    if not times:
+        return raw
+    if any(math.isclose(time, baseline_hour, abs_tol=BASELINE_ATOL) for time in times):
+        raise ValueError(
+            f"Cannot drop baseline hour {baseline_hour:g}. Choose another "
+            "--baseline-hour or remove it from --drop-time."
+        )
+    elapsed = raw["elapsed_hours"].to_numpy(dtype=float)
+    drop_mask = np.zeros(len(raw), dtype=bool)
+    unmatched: list[float] = []
+    for time in times:
+        matches = np.isclose(elapsed, time, atol=BASELINE_ATOL, rtol=0.0)
+        if not matches.any():
+            unmatched.append(time)
+        drop_mask |= matches
+    if unmatched:
+        warnings.warn(
+            "Requested --drop-time value(s) not found: "
+            + ", ".join(f"{value:g}" for value in unmatched),
+            stacklevel=2,
+        )
+    filtered = raw.loc[~drop_mask].copy()
+    print(
+        "Dropped time point(s) from normalized tables and plots: "
+        + ", ".join(f"{value:g}" for value in times if value not in unmatched)
+    )
+    return filtered
+
+
 def resolve_sample_name(requested: object, available_samples: list[str]) -> str:
     """Match a spreadsheet name without altering spaces or display capitalization."""
     text = clean(requested)
@@ -990,26 +1081,60 @@ def read_plot_layout(path: Path, available_samples: list[str]) -> list[PlotDefin
     return definitions
 
 
+def hide_samples_from_plots(
+    definitions: list[PlotDefinition], hidden_samples: list[str]
+) -> list[PlotDefinition]:
+    """Remove selected samples from plot definitions without touching data tables."""
+    hidden = set(hidden_samples)
+    if not hidden:
+        return definitions
+    filtered = [
+        PlotDefinition(
+            definition.name,
+            [sample for sample in definition.sequences if sample not in hidden],
+            [sample for sample in definition.controls if sample not in hidden],
+        )
+        for definition in definitions
+    ]
+    empty_names = [
+        definition.name
+        for definition in filtered
+        if not definition.sequences and not definition.controls
+    ]
+    if empty_names:
+        warnings.warn(
+            "Skipping plot(s) left empty by --hide-sample: " + ", ".join(empty_names),
+            stacklevel=2,
+        )
+    return [
+        definition
+        for definition in filtered
+        if definition.sequences or definition.controls
+    ]
+
+
 def default_plot_definitions(
     samples: list[str],
     controls: list[str],
     group_size: int | None = None,
 ) -> list[PlotDefinition]:
-    """Put every line on one plot unless legacy automatic grouping is requested."""
+    """Always include every line together, then add optional automatic groups."""
     control_set = set(controls)
     sequences = sorted(
         [sample for sample in samples if sample not in control_set], key=natural_key
     )
+    definitions = [PlotDefinition("All sequences", sequences, controls)]
     if group_size is None:
-        return [PlotDefinition("All sequences", sequences, controls)]
+        return definitions
     groups = [
         sequences[start : start + group_size]
         for start in range(0, len(sequences), group_size)
     ]
-    return [
+    definitions.extend(
         PlotDefinition(f"Group {index}", group, controls)
         for index, group in enumerate(groups, start=1)
-    ]
+    )
+    return definitions
 
 
 def write_plot_layout_csv(
@@ -1050,21 +1175,189 @@ def write_plot_layout_csv(
     write_csv(path, rows, fieldnames)
 
 
+def validate_style_value(field: str, value: str, row_number: int) -> Any:
+    """Validate one nonblank value from the optional style spreadsheet."""
+    if field == "color":
+        if not mpl.colors.is_color_like(value):
+            raise ValueError(
+                f"Invalid color {value!r} in color metadata row {row_number}. "
+                "Use a name such as navy or a hex code such as #2A6FDB."
+            )
+        return value
+    if field == "marker":
+        try:
+            mpl.markers.MarkerStyle(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"Invalid marker {value!r} in color metadata row {row_number}."
+            ) from exc
+        return value
+    if field == "linestyle":
+        try:
+            mpl.lines.Line2D([], [], linestyle=value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"Invalid linestyle {value!r} in color metadata row {row_number}."
+            ) from exc
+        return value
+    if field in {"linewidth", "markersize", "markeredgewidth"}:
+        try:
+            number = float(value)
+        except ValueError as exc:
+            raise ValueError(
+                f"{field} must be a number in color metadata row {row_number}."
+            ) from exc
+        if number < 0:
+            raise ValueError(
+                f"{field} cannot be negative in color metadata row {row_number}."
+            )
+        return number
+    if field == "zorder":
+        try:
+            return float(value)
+        except ValueError as exc:
+            raise ValueError(
+                f"zorder must be a number in color metadata row {row_number}."
+            ) from exc
+    if field == "legend_label":
+        return value
+    raise ValueError(f"Unsupported style field: {field}")
+
+
+def read_color_mapping_metadata(
+    path: Path, available_samples: list[str]
+) -> dict[str, dict[str, Any]]:
+    """Read optional per-sample colors, markers, line styles, and legend labels."""
+    if not path.exists():
+        raise FileNotFoundError(f"Color mapping metadata CSV does not exist: {path}")
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        if reader.fieldnames is None:
+            raise ValueError(f"Color mapping metadata {path} has no header row")
+        headers = {
+            normalized_layout_header(header): header for header in reader.fieldnames
+        }
+        if "sample" not in headers:
+            raise ValueError(
+                "Color mapping metadata needs a 'sample' column. Start from the "
+                "generated color_mapping_metadata_template.csv file."
+            )
+        unknown = sorted(set(headers) - set(STYLE_METADATA_FIELDS))
+        if unknown:
+            warnings.warn(
+                "Ignoring unrecognized color metadata column(s): " + ", ".join(unknown),
+                stacklevel=2,
+            )
+
+        overrides: dict[str, dict[str, Any]] = {}
+        for row_number, row in enumerate(reader, start=2):
+            requested_sample = clean(row.get(headers["sample"], ""))
+            if not requested_sample and not any(clean(value) for value in row.values()):
+                continue
+            if not requested_sample:
+                raise ValueError(
+                    f"Missing sample in color mapping metadata row {row_number}"
+                )
+            sample = resolve_sample_name(requested_sample, available_samples)
+            if sample in overrides:
+                raise ValueError(
+                    f"Sample {sample!r} appears more than once in color mapping metadata"
+                )
+            style: dict[str, Any] = {}
+            for field in STYLE_METADATA_FIELDS[1:]:
+                original_header = headers.get(field)
+                if original_header is None:
+                    continue
+                value = clean(row.get(original_header, ""))
+                if value:
+                    target = "label" if field == "legend_label" else field
+                    style[target] = validate_style_value(field, value, row_number)
+            overrides[sample] = style
+    return overrides
+
+
+def build_plot_styles(
+    plot_definitions: list[PlotDefinition],
+    cmap_name: str,
+    max_cmap_position: float,
+    overrides: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Build one stable style per sample and apply spreadsheet overrides."""
+    sequences = list(
+        dict.fromkeys(
+            sample for definition in plot_definitions for sample in definition.sequences
+        )
+    )
+    controls = list(
+        dict.fromkeys(
+            sample for definition in plot_definitions for sample in definition.controls
+        )
+    )
+    sequence_colors = colormap_colors(len(sequences), cmap_name, max_cmap_position)
+    styles = {
+        sample: {
+            "color": color,
+            "marker": EXPERIMENTAL_MARKERS[index % len(EXPERIMENTAL_MARKERS)],
+            "linestyle": "-",
+            "linewidth": 2.0,
+            "markersize": 5.5,
+            "markeredgewidth": 0.8,
+            "zorder": 5,
+        }
+        for index, (sample, color) in enumerate(zip(sequences, sequence_colors))
+    }
+    styles.update(styles_for_controls(controls))
+    for sample, custom_style in overrides.items():
+        if sample in styles:
+            styles[sample].update(custom_style)
+    return styles
+
+
+def write_color_mapping_csv(
+    path: Path,
+    samples: list[str],
+    styles: dict[str, dict[str, Any]],
+) -> None:
+    """Write styles in a spreadsheet-friendly, reusable format."""
+    rows: list[dict[str, object]] = []
+    for sample in samples:
+        style = styles[sample]
+        rows.append(
+            {
+                "sample": sample,
+                "color": mpl.colors.to_hex(style["color"], keep_alpha=False),
+                "marker": style["marker"],
+                "linestyle": style["linestyle"],
+                "linewidth": style["linewidth"],
+                "markersize": style["markersize"],
+                "markeredgewidth": style["markeredgewidth"],
+                "zorder": style["zorder"],
+                "legend_label": style.get("label", ""),
+            }
+        )
+    write_csv(path, rows, STYLE_METADATA_FIELDS)
+
+
 def styles_for_controls(controls: list[str]) -> dict[str, dict[str, Any]]:
     """Return stable styles for built-in and user-defined controls."""
     fallback_colors = mpl.colormaps["tab10"].colors
     fallback_markers = ["s", "o", "^", "v", "P", "X"]
     styles: dict[str, dict[str, Any]] = {}
     for index, control in enumerate(controls):
-        styles[control] = CONTROL_STYLE.get(
-            control,
-            {
+        styles[control] = {
+            **CONTROL_STYLE.get(
+                control,
+                {
                 "color": fallback_colors[index % len(fallback_colors)],
                 "marker": fallback_markers[index % len(fallback_markers)],
                 "linestyle": "--",
                 "zorder": 8,
-            },
-        )
+                },
+            ),
+            "linewidth": 2.0,
+            "markersize": 5.5,
+            "markeredgewidth": 0.8,
+        }
     return styles
 
 
@@ -1076,7 +1369,11 @@ def plot_sample(
     color: Any,
     marker: str,
     linestyle: str = "-",
-    zorder: int = 5,
+    linewidth: float = 2.0,
+    markersize: float = 5.5,
+    markeredgewidth: float = 0.8,
+    zorder: float = 5,
+    label: str | None = None,
     show_sem: bool = True,
     mean_column: str = PLOT_MEAN_COLUMN,
     sem_column: str = PLOT_SEM_COLUMN,
@@ -1093,13 +1390,13 @@ def plot_sample(
     ax.plot(
         x,
         y,
-        label=sample,
+        label=label or sample,
         color=color,
         marker=marker,
         linestyle=linestyle,
-        linewidth=2.0,
-        markersize=5.5,
-        markeredgewidth=0.8,
+        linewidth=linewidth,
+        markersize=markersize,
+        markeredgewidth=markeredgewidth,
         zorder=zorder,
     )
 
@@ -1124,6 +1421,19 @@ def style_plot_axis(
     y_label: str,
     baseline: float,
     baseline_hour: float,
+    title_font_size: float,
+    axis_font_size: float,
+    tick_font_size: float,
+    legend_font_size: float,
+    legend_location: str,
+    legend_columns: int,
+    x_axis_linewidth: float,
+    y_axis_linewidth: float,
+    additional_hlines: list[float],
+    h_line_color: str,
+    h_line_style: str,
+    h_line_width: float,
+    h_line_alpha: float,
 ) -> None:
     """Apply one shared visual style to every user-defined plot."""
     ax.axhline(
@@ -1134,23 +1444,36 @@ def style_plot_axis(
         alpha=0.25,
         zorder=0,
     )
-    ax.set_title(title, fontsize=15, pad=12)
-    ax.set_xlabel("Elapsed time (hours)", fontsize=12)
-    ax.set_ylabel(y_label, fontsize=12)
-    ax.tick_params(axis="both", labelsize=10)
+    for y_value in additional_hlines:
+        ax.axhline(
+            y_value,
+            color=h_line_color,
+            linewidth=h_line_width,
+            linestyle=h_line_style,
+            alpha=h_line_alpha,
+            zorder=0,
+        )
+    ax.set_title(title, fontsize=title_font_size, pad=12)
+    ax.set_xlabel("Elapsed time (hours)", fontsize=axis_font_size)
+    ax.set_ylabel(y_label, fontsize=axis_font_size)
+    ax.tick_params(axis="both", labelsize=tick_font_size)
     ax.ticklabel_format(axis="y", style="plain", useOffset=False)
     ax.grid(axis="y", alpha=0.22, linewidth=0.8)
     ax.margins(x=0.02)
     ax.set_xlim(left=baseline_hour)
+    for spine_name in ("bottom", "top"):
+        ax.spines[spine_name].set_linewidth(x_axis_linewidth)
+    for spine_name in ("left", "right"):
+        ax.spines[spine_name].set_linewidth(y_axis_linewidth)
 
     handles, labels = ax.get_legend_handles_labels()
     ax.legend(
         handles,
         labels,
         frameon=False,
-        fontsize=9,
-        ncol=2,
-        loc="best",
+        fontsize=legend_font_size,
+        ncol=legend_columns,
+        loc=legend_location,
         handlelength=2.4,
     )
 
@@ -1176,8 +1499,21 @@ def create_plot_set(
     scale_name: str,
     show_sem: bool,
     dpi: int,
+    plot_styles: dict[str, dict[str, Any]],
     cmap_name: str,
-    max_cmap_position: float,
+    title_font_size: float,
+    axis_font_size: float,
+    tick_font_size: float,
+    legend_font_size: float,
+    legend_location: str,
+    legend_columns: int,
+    x_axis_linewidth: float,
+    y_axis_linewidth: float,
+    additional_hlines: list[float],
+    h_line_color: str,
+    h_line_style: str,
+    h_line_width: float,
+    h_line_alpha: float,
 ) -> list[dict[str, object]]:
     """Create one figure per spreadsheet row with stable styles across plots."""
     manifest: list[dict[str, object]] = []
@@ -1192,34 +1528,6 @@ def create_plot_set(
             f"No measurements remain at or after baseline hour {baseline_hour:g}."
         )
 
-    all_sequences = list(
-        dict.fromkeys(
-            sample
-            for definition in plot_definitions
-            for sample in definition.sequences
-        )
-    )
-    all_controls = list(
-        dict.fromkeys(
-            sample
-            for definition in plot_definitions
-            for sample in definition.controls
-        )
-    )
-    sequence_colors = colormap_colors(
-        len(all_sequences), cmap_name, max_cmap_position
-    )
-    sequence_styles = {
-        sample: {
-            "color": color,
-            "marker": EXPERIMENTAL_MARKERS[index % len(EXPERIMENTAL_MARKERS)],
-            "linestyle": "-",
-            "zorder": 5,
-        }
-        for index, (sample, color) in enumerate(zip(all_sequences, sequence_colors))
-    }
-    control_styles = styles_for_controls(all_controls)
-
     for plot_number, definition in enumerate(plot_definitions, start=1):
         fig, ax = plt.subplots(figsize=(8.2, 5.8), constrained_layout=True)
         for sample in definition.sequences:
@@ -1230,7 +1538,7 @@ def create_plot_set(
                 show_sem=show_sem,
                 mean_column=mean_column,
                 sem_column=sem_column,
-                **sequence_styles[sample],
+                **plot_styles[sample],
             )
 
         for control in definition.controls:
@@ -1241,7 +1549,7 @@ def create_plot_set(
                 show_sem=show_sem,
                 mean_column=mean_column,
                 sem_column=sem_column,
-                **control_styles[control],
+                **plot_styles[control],
             )
 
         style_plot_axis(
@@ -1250,6 +1558,19 @@ def create_plot_set(
             y_label=y_label,
             baseline=baseline,
             baseline_hour=baseline_hour,
+            title_font_size=title_font_size,
+            axis_font_size=axis_font_size,
+            tick_font_size=tick_font_size,
+            legend_font_size=legend_font_size,
+            legend_location=legend_location,
+            legend_columns=legend_columns,
+            x_axis_linewidth=x_axis_linewidth,
+            y_axis_linewidth=y_axis_linewidth,
+            additional_hlines=additional_hlines,
+            h_line_color=h_line_color,
+            h_line_style=h_line_style,
+            h_line_width=h_line_width,
+            h_line_alpha=h_line_alpha,
         )
 
         png_name = (
@@ -1270,22 +1591,30 @@ def create_plot_set(
                 "matplotlib_y_column": mean_column,
                 "first_plotted_hour": baseline_hour,
                 "sem_shown": show_sem,
+                "horizontal_lines": ";".join(str(value) for value in additional_hlines),
+                "legend_location": legend_location,
                 "png": png_name,
             }
         )
     return manifest
 
 
-def remove_old_outputs(output_dir: Path) -> None:
-    """Remove files generated by a previous run in the same plot directory."""
-    patterns = (
-        "incucyte_normalized_*.png",
-        "incucyte_log2_*.png",
-        "plot_manifest.csv",
-    )
-    for pattern in patterns:
-        for path in output_dir.glob(pattern):
-            path.unlink()
+def warn_existing_output(output_dir: Path) -> None:
+    """Explain the safe overwrite behavior before writing into an existing folder."""
+    if not output_dir.exists():
+        return
+    existing_files = sum(1 for path in output_dir.rglob("*") if path.is_file())
+    if existing_files:
+        suggested_name = (
+            f"incucyte_results_{datetime.now().strftime('%Y-%m-%d')}_experiment_name"
+        )
+        warnings.warn(
+            f"Output directory {output_dir} already contains {existing_files} file(s). "
+            "Files with the same names will be overwritten, but no other files will "
+            "be deleted. To keep this run completely separate, choose a clear new "
+            f"folder such as --output '{suggested_name}'.",
+            stacklevel=2,
+        )
 
 
 def make_audit(
@@ -1372,8 +1701,8 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
         type=int,
         default=None,
         help=(
-            "Automatically split non-controls into groups of this size. "
-            "For exact plot contents and names, use --plot-layout instead."
+            "Also create automatic non-control groups of this size. The all-sequences "
+            "plot is always created first. For exact contents, use --plot-layout."
         ),
     )
     parser.add_argument("--title-prefix", default=None)
@@ -1389,7 +1718,30 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
     parser.add_argument(
         "--controls",
         default="WT,Shuffle,NALM6",
-        help="Comma-separated control sample names; use an empty string for none",
+        help=(
+            "Comma-separated control sample names. Put the whole list in shell quotes, "
+            "for example --controls 'WT, Shuffle'. Use --controls '' for none."
+        ),
+    )
+    parser.add_argument(
+        "--drop-time",
+        action="append",
+        default=None,
+        metavar="HOURS",
+        help=(
+            "Comma-separated elapsed hours to remove from normalized tables and plots, "
+            "for example --drop-time '22, 55'. May be repeated."
+        ),
+    )
+    parser.add_argument(
+        "--hide-sample",
+        action="append",
+        default=None,
+        metavar="NAMES",
+        help=(
+            "Comma-separated sample names to hide from every plot while retaining their "
+            "data, for example --hide-sample '70, NALM6'. May be repeated."
+        ),
     )
     parser.add_argument(
         "--metric", default=None, help="Metric to select when exports contain several"
@@ -1409,6 +1761,89 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
         default=0.72,
         help="Upper position sampled from the chosen color map (default: 0.72)",
     )
+    parser.add_argument(
+        "--color-mapping-metadata",
+        type=Path,
+        default=None,
+        help=(
+            "Optional CSV assigning exact colors, markers, line styles, line widths, "
+            "marker sizes, drawing order, and legend labels to individual samples."
+        ),
+    )
+    parser.add_argument(
+        "--font",
+        default=None,
+        help=(
+            "Installed font family, for example Avenir, Arial, or Times New Roman. "
+            "The default prefers Avenir and safely falls back to DejaVu Sans."
+        ),
+    )
+    parser.add_argument(
+        "--font-size",
+        type=float,
+        default=12.0,
+        help="Base font size in points (default: 12)",
+    )
+    parser.add_argument("--title-font-size", type=float, default=None)
+    parser.add_argument("--axis-font-size", type=float, default=None)
+    parser.add_argument("--tick-font-size", type=float, default=None)
+    parser.add_argument("--legend-font-size", type=float, default=None)
+    parser.add_argument(
+        "--legend-location",
+        choices=(
+            "best",
+            "upper right",
+            "upper left",
+            "lower left",
+            "lower right",
+            "right",
+            "center left",
+            "center right",
+            "lower center",
+            "upper center",
+            "center",
+        ),
+        default="best",
+        help="Legend position (default: best)",
+    )
+    parser.add_argument(
+        "--legend-columns",
+        type=int,
+        default=2,
+        help="Number of legend columns (default: 2)",
+    )
+    parser.add_argument(
+        "--x-axis-linewidth",
+        type=float,
+        default=1.0,
+        help="Thickness of the horizontal axis spine in points (default: 1)",
+    )
+    parser.add_argument(
+        "--y-axis-linewidth",
+        type=float,
+        default=1.0,
+        help="Thickness of the vertical axis spine in points (default: 1)",
+    )
+    parser.add_argument(
+        "--h-line",
+        action="append",
+        type=float,
+        default=[],
+        metavar="Y",
+        help="Add a horizontal line at Y on linear plots; repeat for more lines",
+    )
+    parser.add_argument(
+        "--log2-h-line",
+        action="append",
+        type=float,
+        default=[],
+        metavar="Y",
+        help="Add a horizontal line at Y on log2 plots; repeat for more lines",
+    )
+    parser.add_argument("--h-line-color", default="#666666")
+    parser.add_argument("--h-line-style", default="--")
+    parser.add_argument("--h-line-width", type=float, default=1.0)
+    parser.add_argument("--h-line-alpha", type=float, default=0.5)
     return parser
 
 
@@ -1421,11 +1856,39 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
         raise ValueError("Use either --plot-layout or --group-size, not both")
     if not 0.08 <= args.max_cmap_position <= 1.0:
         raise ValueError("--max-cmap-position must be from 0.08 through 1.0")
+    font_sizes = [
+        args.font_size,
+        args.title_font_size,
+        args.axis_font_size,
+        args.tick_font_size,
+        args.legend_font_size,
+    ]
+    if any(value is not None and value <= 0 for value in font_sizes):
+        raise ValueError("All font sizes must be greater than 0")
+    if args.legend_columns < 1:
+        raise ValueError("--legend-columns must be at least 1")
+    if args.x_axis_linewidth < 0 or args.y_axis_linewidth < 0:
+        raise ValueError("Axis line widths cannot be negative")
+    if args.h_line_width < 0:
+        raise ValueError("--h-line-width cannot be negative")
+    if not 0 <= args.h_line_alpha <= 1:
+        raise ValueError("--h-line-alpha must be from 0 through 1")
+    if not mpl.colors.is_color_like(args.h_line_color):
+        raise ValueError(f"Invalid --h-line-color: {args.h_line_color!r}")
+    try:
+        mpl.lines.Line2D([], [], linestyle=args.h_line_style)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid --h-line-style: {args.h_line_style!r}") from exc
     cmap_name = resolve_colormap_name(args.cmap)
 
-    selected_font = set_avenir_font()
+    selected_font = set_plot_font(args.font)
+    title_font_size = args.title_font_size or args.font_size + 3
+    axis_font_size = args.axis_font_size or args.font_size
+    tick_font_size = args.tick_font_size or max(args.font_size - 2, 1)
+    legend_font_size = args.legend_font_size or max(args.font_size - 3, 1)
     tables_dir = args.output / "tables"
     plots_dir = args.output / "plots"
+    warn_existing_output(args.output)
 
     long_path = reshape_exports(
         args.metadata,
@@ -1435,6 +1898,8 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
         "incucyte_raw_summary.csv",
     )
     raw = prepare_input(long_path, args.metric)
+    dropped_times = parse_drop_times(args.drop_time)
+    raw = drop_time_points(raw, dropped_times, args.baseline_hour)
 
     normalized = normalize_per_well(raw, args.baseline_hour)
     normalized = add_log2_fold_change(normalized, args.baseline_hour)
@@ -1442,7 +1907,6 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     log2_summary = make_log2_plot_summary(normalized, args.baseline_hour)
 
     plots_dir.mkdir(parents=True, exist_ok=True)
-    remove_old_outputs(plots_dir)
 
     normalized.to_csv(tables_dir / "incucyte_normalized_long.csv", index=False)
     summary.to_csv(tables_dir / "incucyte_plot_data.csv", index=False)
@@ -1453,7 +1917,19 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     available_samples = sorted(
         [str(sample) for sample in summary["sample"].unique()], key=natural_key
     )
+    hidden_samples = list(
+        dict.fromkeys(
+            resolve_sample_name(name, available_samples)
+            for name in parse_comma_options(args.hide_sample)
+        )
+    )
+    plot_available_samples = [
+        sample for sample in available_samples if sample not in set(hidden_samples)
+    ]
+    if hidden_samples:
+        print("Hidden from plots: " + ", ".join(hidden_samples))
     present_samples = set(available_samples)
+    plot_samples = set(plot_available_samples)
     sample_case = {sample.casefold(): sample for sample in available_samples}
     requested_controls = list(
         dict.fromkeys(
@@ -1462,11 +1938,12 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
         )
     )
     suggested_controls = [
-        name for name in requested_controls if name in present_samples
+        name for name in requested_controls if name in plot_samples
     ]
 
     if args.plot_layout is not None:
         plot_definitions = read_plot_layout(args.plot_layout, available_samples)
+        plot_definitions = hide_samples_from_plots(plot_definitions, hidden_samples)
     else:
         missing_controls = [
             name for name in requested_controls if name not in present_samples
@@ -1474,7 +1951,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
         if missing_controls:
             warnings.warn(f"Missing controls: {', '.join(missing_controls)}", stacklevel=2)
         plot_definitions = default_plot_definitions(
-            available_samples,
+            plot_available_samples,
             suggested_controls,
             args.group_size,
         )
@@ -1488,7 +1965,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     template_path = tables_dir / "plot_layout_template.csv"
     layout_used_path = tables_dir / "plot_layout_used.csv"
     starter_definition = default_plot_definitions(
-        available_samples, suggested_controls
+        plot_available_samples, suggested_controls
     )
     if (
         args.plot_layout is None
@@ -1501,6 +1978,38 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
             minimum_control_columns=2,
         )
     write_plot_layout_csv(layout_used_path, plot_definitions)
+
+    style_overrides = (
+        read_color_mapping_metadata(args.color_mapping_metadata, available_samples)
+        if args.color_mapping_metadata is not None
+        else {}
+    )
+    plot_styles = build_plot_styles(
+        plot_definitions, cmap_name, args.max_cmap_position, style_overrides
+    )
+    style_template_path = tables_dir / "color_mapping_metadata_template.csv"
+    style_used_path = tables_dir / "color_mapping_metadata_used.csv"
+    starter_styles = build_plot_styles(
+        starter_definition, cmap_name, args.max_cmap_position, {}
+    )
+    if (
+        args.color_mapping_metadata is None
+        or args.color_mapping_metadata.resolve() != style_template_path.resolve()
+    ):
+        write_color_mapping_csv(
+            style_template_path,
+            plot_available_samples,
+            starter_styles,
+        )
+    plotted_samples = list(
+        dict.fromkeys(
+            sample
+            for definition in plot_definitions
+            for sample in definition.sequences + definition.controls
+        )
+    )
+    write_color_mapping_csv(style_used_path, plotted_samples, plot_styles)
+
     title_prefix = args.title_prefix or f"Incucyte — normalized to {args.baseline_hour:g} h"
     log2_title_prefix = args.log2_title_prefix or (
         f"Incucyte — log2 fold change relative to {args.baseline_hour:g} h"
@@ -1523,8 +2032,21 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
         scale_name="linear fold change",
         show_sem=not args.no_sem,
         dpi=args.dpi,
+        plot_styles=plot_styles,
         cmap_name=cmap_name,
-        max_cmap_position=args.max_cmap_position,
+        title_font_size=title_font_size,
+        axis_font_size=axis_font_size,
+        tick_font_size=tick_font_size,
+        legend_font_size=legend_font_size,
+        legend_location=args.legend_location,
+        legend_columns=args.legend_columns,
+        x_axis_linewidth=args.x_axis_linewidth,
+        y_axis_linewidth=args.y_axis_linewidth,
+        additional_hlines=args.h_line,
+        h_line_color=args.h_line_color,
+        h_line_style=args.h_line_style,
+        h_line_width=args.h_line_width,
+        h_line_alpha=args.h_line_alpha,
     )
     manifest.extend(
         create_plot_set(
@@ -1545,10 +2067,46 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
             scale_name="log2 fold change",
             show_sem=not args.no_sem,
             dpi=args.dpi,
+            plot_styles=plot_styles,
             cmap_name=cmap_name,
-            max_cmap_position=args.max_cmap_position,
+            title_font_size=title_font_size,
+            axis_font_size=axis_font_size,
+            tick_font_size=tick_font_size,
+            legend_font_size=legend_font_size,
+            legend_location=args.legend_location,
+            legend_columns=args.legend_columns,
+            x_axis_linewidth=args.x_axis_linewidth,
+            y_axis_linewidth=args.y_axis_linewidth,
+            additional_hlines=args.log2_h_line,
+            h_line_color=args.h_line_color,
+            h_line_style=args.h_line_style,
+            h_line_width=args.h_line_width,
+            h_line_alpha=args.h_line_alpha,
         )
     )
+    run_plot_settings = {
+        "font": selected_font,
+        "title_font_size": title_font_size,
+        "axis_font_size": axis_font_size,
+        "tick_font_size": tick_font_size,
+        "legend_font_size": legend_font_size,
+        "legend_columns": args.legend_columns,
+        "x_axis_linewidth": args.x_axis_linewidth,
+        "y_axis_linewidth": args.y_axis_linewidth,
+        "h_line_color": args.h_line_color,
+        "h_line_style": args.h_line_style,
+        "h_line_width": args.h_line_width,
+        "h_line_alpha": args.h_line_alpha,
+        "dropped_times": ";".join(f"{value:g}" for value in dropped_times),
+        "hidden_samples": ";".join(hidden_samples),
+        "color_mapping_metadata": (
+            str(args.color_mapping_metadata.resolve())
+            if args.color_mapping_metadata is not None
+            else "generated defaults"
+        ),
+    }
+    for record in manifest:
+        record.update(run_plot_settings)
     pd.DataFrame(manifest).to_csv(plots_dir / "plot_manifest.csv", index=False)
 
     baseline_error = np.abs(audit[PLOT_MEAN_COLUMN].to_numpy(dtype=float) - 1.0).max()
@@ -1587,6 +2145,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
         f"in {plots_dir.resolve()}"
     )
     print(f"Editable plot layout template: {template_path.resolve()}")
+    print(f"Editable color/style template: {style_template_path.resolve()}")
     print(f"All results: {args.output.resolve()}")
     return 0
 

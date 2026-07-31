@@ -71,11 +71,56 @@ Quote any shell path containing spaces:
 Example 6: another color map
 ----------------------------------------
 
+In the short option examples below, ``...`` means to retain the metadata,
+plate-file, and output arguments from one of the complete commands above. Do not
+type the three dots.
+
 Keep the same analysis and use ``viridis`` for experimental sequences:
 
 .. code-block:: console
 
    auto-incucyte ... --cmap viridis
+
+Example 7: groups plus a complete plot
+--------------------------------------
+
+Create the complete all-sequences figure and additional groups of five. The
+quoted controls appear on every group:
+
+.. code-block:: console
+
+   auto-incucyte ... --controls 'WT, Shuffle' --group-size 5
+
+Example 8: drop time points and hide samples
+--------------------------------------------
+
+.. code-block:: console
+
+   auto-incucyte ... \
+     --drop-time '22, 55' \
+     --hide-sample '70, NALM6'
+
+Example 9: manuscript styling
+-----------------------------
+
+After editing ``color_mapping_metadata_template.csv``:
+
+.. code-block:: console
+
+   auto-incucyte ... \
+     --color-mapping-metadata 'manuscript plot styles.csv' \
+     --font 'Arial' \
+     --title-font-size 16 \
+     --axis-font-size 13 \
+     --legend-location 'upper left' \
+     --legend-columns 1 \
+     --x-axis-linewidth 2 \
+     --y-axis-linewidth 2 \
+     --h-line 2 \
+     --log2-h-line 1
+
+The repository's ``examples/color_mapping_metadata.csv`` is a ready-to-run
+style file using the bundled synthetic data.
 
 Expected plotting behavior
 --------------------------

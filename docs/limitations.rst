@@ -38,4 +38,9 @@ Best practices
 * Inspect ``normalization_audit.csv`` for every run.
 * Archive ``plot_layout_used.csv`` so figure membership and controls remain
   reproducible.
+* Archive ``color_mapping_metadata_used.csv`` so exact plot styling remains
+  reproducible.
+* Use a new descriptively named output directory for each final analysis. Reruns
+  never delete files, so an intentionally reused folder can retain old plots
+  whose filenames are not regenerated.
 * Use the plot-data tables, not pixels from the PNG, for quantitative follow-up.

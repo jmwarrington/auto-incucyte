@@ -2,6 +2,7 @@ import csv
 import os
 import tempfile
 import unittest
+import warnings
 from pathlib import Path
 
 os.environ.setdefault("MPLCONFIGDIR", str(Path(tempfile.gettempdir()) / "auto_incucyte_mpl"))
@@ -13,15 +14,18 @@ from auto_incucyte.analysis import (
     LOG2_PLOT_MEAN_COLUMN,
     NORMALIZED_COLUMN,
     PLOT_MEAN_COLUMN,
+    STYLE_METADATA_FIELDS,
     add_log2_fold_change,
     colormap_colors,
     default_plot_definitions,
+    drop_time_points,
     main,
     make_log2_plot_summary,
     make_plot_summary,
     normalize_per_well,
     parse_plate_export,
     read_plot_layout,
+    read_color_mapping_metadata,
     resolve_colormap_name,
 )
 
@@ -38,6 +42,52 @@ class AnalysisTests(unittest.TestCase):
             definitions[0].sequences, ["Sequence Alpha", "Sequence Beta"]
         )
         self.assertEqual(definitions[0].controls, ["Wild Type Control"])
+
+    def test_group_size_keeps_all_sequences_plot_and_adds_groups(self):
+        definitions = default_plot_definitions(
+            ["Sequence 1", "Sequence 2", "Sequence 3", "WT"],
+            ["WT"],
+            group_size=2,
+        )
+        self.assertEqual(
+            [definition.name for definition in definitions],
+            ["All sequences", "Group 1", "Group 2"],
+        )
+        self.assertEqual(definitions[0].sequences, ["Sequence 1", "Sequence 2", "Sequence 3"])
+        self.assertEqual(definitions[1].controls, ["WT"])
+
+    def test_drop_times_protects_baseline(self):
+        raw = pd.DataFrame(
+            {"elapsed_hours": [0.0, 2.0, 4.0], "sample": ["A", "A", "A"]}
+        )
+        filtered = drop_time_points(raw, [2.0], 0.0)
+        self.assertEqual(filtered["elapsed_hours"].tolist(), [0.0, 4.0])
+        with self.assertRaisesRegex(ValueError, "Cannot drop baseline hour"):
+            drop_time_points(raw, [0.0], 0.0)
+
+    def test_color_mapping_metadata_supports_spaces_and_exact_styles(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "my exact colors.csv"
+            with path.open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(
+                    [
+                        "sample",
+                        "color",
+                        "marker",
+                        "linestyle",
+                        "linewidth",
+                        "markersize",
+                        "legend_label",
+                    ]
+                )
+                writer.writerow(
+                    ["Sequence with spaces", "#123ABC", "o", "--", "3", "8", "My label"]
+                )
+            styles = read_color_mapping_metadata(path, ["Sequence with spaces"])
+        self.assertEqual(styles["Sequence with spaces"]["color"], "#123ABC")
+        self.assertEqual(styles["Sequence with spaces"]["linewidth"], 3.0)
+        self.assertEqual(styles["Sequence with spaces"]["label"], "My label")
 
     def test_plot_layout_preserves_spaces_and_assigns_controls_per_plot(self):
         available = [
@@ -181,6 +231,79 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(layout_used.loc[0, "control_1"], "Wild Type Control")
         self.assertEqual(layout_used.loc[1, "control_1"], "Wild Type Control")
         self.assertEqual(layout_used.loc[1, "control_2"], "Vehicle Control")
+
+    def test_custom_filters_grouping_and_existing_output_are_safe(self):
+        example_export = Path(__file__).parents[1] / "examples" / "plate_1.txt"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            metadata = root / "metadata.csv"
+            with metadata.open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(["well", "sample", "plate"])
+                writer.writerows(
+                    [
+                        ["A1", "Treatment Alpha", 1],
+                        ["A2", "Treatment Alpha", 1],
+                        ["A3", "WT", 1],
+                        ["A4", "WT", 1],
+                        ["A5", "Sample to hide", 1],
+                        ["A6", "Sample to hide", 1],
+                    ]
+                )
+            colors = root / "colors.csv"
+            with colors.open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(STYLE_METADATA_FIELDS)
+                writer.writerow(
+                    ["Treatment Alpha", "#0055AA", "o", "--", 3, 7, 1, 12, "Treatment A"]
+                )
+            output = root / "existing results"
+            output.mkdir()
+            existing = output / "do not delete me.txt"
+            existing.write_text("important", encoding="utf-8")
+            existing_plots = output / "plots"
+            existing_plots.mkdir()
+            old_plot = existing_plots / "incucyte_normalized_99_old_plot.png"
+            old_plot.write_bytes(b"old plot placeholder")
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                status = main(
+                    [
+                        "--metadata", str(metadata), str(example_export),
+                        "--controls", "WT",
+                        "--group-size", "1",
+                        "--drop-time", "2, 55",
+                        "--hide-sample", "sample TO HIDE",
+                        "--color-mapping-metadata", str(colors),
+                        "--font", "DejaVu Sans",
+                        "--font-size", "11",
+                        "--legend-location", "upper left",
+                        "--x-axis-linewidth", "2",
+                        "--y-axis-linewidth", "2.5",
+                        "--h-line", "2",
+                        "--log2-h-line", "1",
+                        "--output", str(output),
+                    ],
+                    prog="auto-incucyte",
+                )
+            manifest = pd.read_csv(output / "plots" / "plot_manifest.csv")
+            plot_data = pd.read_csv(output / "tables" / "incucyte_plot_data.csv")
+            raw_data = pd.read_csv(output / "tables" / "incucyte_long.csv")
+            style_used = pd.read_csv(output / "tables" / "color_mapping_metadata_used.csv")
+            pngs = sorted((output / "plots").glob("*.png"))
+
+            self.assertTrue(existing.exists())
+            self.assertEqual(existing.read_text(encoding="utf-8"), "important")
+            self.assertEqual(old_plot.read_bytes(), b"old plot placeholder")
+        self.assertEqual(status, 0)
+        self.assertEqual(len(pngs), 5)
+        self.assertEqual(set(manifest["plot_name"]), {"All sequences", "Group 1"})
+        self.assertNotIn("Sample to hide", ";".join(manifest["sequence_names"]))
+        self.assertEqual(set(plot_data["elapsed_hours"]), {0.0, 4.0})
+        self.assertEqual(set(raw_data["elapsed_hours"]), {0.0, 2.0, 4.0})
+        self.assertIn("Sample to hide", set(plot_data["sample"]))
+        self.assertEqual(style_used.loc[style_used["sample"].eq("Treatment Alpha"), "color"].iloc[0], "#0055aa")
+        self.assertTrue(any("no other files will be deleted" in str(item.message) for item in caught))
 
 
 if __name__ == "__main__":

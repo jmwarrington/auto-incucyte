@@ -1,6 +1,13 @@
 Configuring the analysis
 ========================
 
+.. important::
+
+   On this page, ``...`` means “keep the metadata file, plate export, and output
+   parts of the complete command from the :doc:`quickstart`.” Do not type the
+   three dots. The quick-start and :doc:`examples` pages contain complete
+   copy-and-paste commands.
+
 Baseline hour
 -------------
 
@@ -29,7 +36,7 @@ another comma-separated list:
 
 .. code-block:: console
 
-   auto-incucyte ... --controls WT,Vehicle,Untreated
+   auto-incucyte ... --controls 'WT, Vehicle, Untreated'
 
 Names are matched case-insensitively to metadata labels. Disable special control
 handling with an empty string:
@@ -68,8 +75,27 @@ Names are matched case-insensitively against the metadata. Spaces are preserved
 in plot titles and legends. A correctly quoted CSV cell can also contain commas.
 If a name does not match, the error lists every available sequence name.
 
-Automatic grouping remains available with ``--group-size``, but the layout CSV
-is recommended when exact plot membership and titles matter.
+Automatic grouping remains available with ``--group-size``. It always adds
+group plots after the complete ``All sequences`` plot; it never replaces that
+complete plot. The layout CSV is recommended when exact membership and titles
+matter.
+
+Drop time points or hide samples
+--------------------------------
+
+Remove selected recorded hours from normalized tables and every plot:
+
+.. code-block:: console
+
+   auto-incucyte ... --drop-time '22, 55'
+
+The original reshaped raw tables retain those measurements, and the baseline
+hour cannot be dropped. Hide samples from plots without removing their table
+data with:
+
+.. code-block:: console
+
+   auto-incucyte ... --hide-sample '70, NALM6'
 
 Color map
 ---------
@@ -82,6 +108,61 @@ The default color map remains ``plasma``. Any Matplotlib color map can be used:
 
 Common choices include ``magma``, ``inferno``, ``cividis``, ``turbo``, and
 ``tab10``. The chosen map is recorded in ``plot_manifest.csv``.
+
+Exact per-sample styles
+-----------------------
+
+Every run writes ``tables/color_mapping_metadata_template.csv``. Edit it in a
+spreadsheet to set an exact color, marker, line style, line width, marker size,
+marker-edge width, drawing order, and legend label for each sample. Then run:
+
+.. code-block:: console
+
+   auto-incucyte ... \
+     --color-mapping-metadata 'my exact plot styles.csv'
+
+Colors may be names such as ``navy`` or hex values such as ``#2A6FDB``. Common
+markers are ``o``, ``s``, ``^``, ``D``, ``X``, and ``P``. Common line styles
+are ``-``, ``--``, ``:``, and ``-.``. The final resolved styles are recorded in
+``color_mapping_metadata_used.csv``.
+
+Typography, legends, axes, and reference lines
+-----------------------------------------------
+
+Choose an installed font and either a base size or exact component sizes:
+
+.. code-block:: console
+
+   auto-incucyte ... \
+     --font 'Times New Roman' \
+     --title-font-size 16 \
+     --axis-font-size 13 \
+     --tick-font-size 11 \
+     --legend-font-size 10
+
+Move the legend and change axis-spine thickness:
+
+.. code-block:: console
+
+   auto-incucyte ... \
+     --legend-location 'upper left' \
+     --legend-columns 1 \
+     --x-axis-linewidth 2 \
+     --y-axis-linewidth 2.5
+
+Add separate reference values to linear and log2 plots. Repeat either line flag
+to add more values:
+
+.. code-block:: console
+
+   auto-incucyte ... \
+     --h-line 2 \
+     --h-line 3 \
+     --log2-h-line 1 \
+     --h-line-color '#555555' \
+     --h-line-style='--' \
+     --h-line-width 1.5 \
+     --h-line-alpha 0.7
 
 Standard error
 --------------

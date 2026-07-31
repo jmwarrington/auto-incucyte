@@ -50,6 +50,19 @@ Missing control warning
 This warning does not stop analysis. Correct the metadata label or update
 ``--controls`` to the controls used in this experiment.
 
+Controls with spaces are split or rejected
+-------------------------------------------
+
+Quote the entire comma-separated value, not the individual words:
+
+.. code-block:: console
+
+   auto-incucyte \
+     --metadata 'plate metadata.csv' \
+     'raw plate 1.txt' \
+     --controls 'WT, Wild Type Control, Shuffle' \
+     --output 'incucyte_results'
+
 ``Plot layout name ... was not found``
 --------------------------------------
 
@@ -68,3 +81,36 @@ Matplotlib font warning
 
 The program prefers Avenir and falls back to DejaVu Sans when Avenir is not
 installed. This changes typography, not values or normalization.
+
+``Font ... is not installed``
+-----------------------------
+
+The value passed to ``--font`` must be installed on the current computer. Try
+``Avenir``, ``Arial``, ``Times New Roman``, or ``DejaVu Sans`` depending on the
+system. Quote font names containing spaces.
+
+Color-mapping metadata error
+----------------------------
+
+Start from ``color_mapping_metadata_template.csv``. Confirm that every sample
+matches the plate metadata and that colors, markers, line styles, and numeric
+sizes are valid. The error reports the problematic spreadsheet row.
+
+Requested drop time was not found
+---------------------------------
+
+Inspect the exact ``elapsed_hours`` values in ``incucyte_long.csv``. This is a
+warning; the analysis continues and reports which requested values were absent.
+
+``Cannot drop baseline hour``
+-----------------------------
+
+Normalization requires that measurement. Remove it from ``--drop-time`` or
+select a different scientifically appropriate ``--baseline-hour``.
+
+Existing output directory warning
+---------------------------------
+
+This warning protects the experiment record. Matching generated filenames will
+be overwritten, but no other files are deleted. Choose a new descriptive
+``--output`` folder to keep runs completely separate.

@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 project = "auto-incucyte"
 author = "J. M. Warrington"
 copyright = "2026, J. M. Warrington"
-version = "0.2"
+version = "0.3"
 release = "0.2.0"
 
 extensions = [
