@@ -1,0 +1,11 @@
+.wy-nav-content {
+  max-width: 1000px;
+}
+
+.rst-content code.literal {
+  color: #7a1f5c;
+}
+
+.rst-content .admonition-title {
+  font-weight: 700;
+}
