@@ -108,6 +108,34 @@ warning; the analysis continues and reports which requested values were absent.
 Normalization requires that measurement. Remove it from ``--drop-time`` or
 select a different scientifically appropriate ``--baseline-hour``.
 
+Refeed has no recorded image afterward
+---------------------------------------
+
+The entered event occurs after the final Incucyte measurement. Correct the
+event time or provide an export that includes later images.
+
+Missing refeed baseline for a physical well
+-------------------------------------------
+
+The program found the first recorded image at or after the event, but at least
+one physical well lacks a value at that elapsed hour. Inspect
+``incucyte_long.csv`` and the source export. The run stops because silently
+using different baseline images for different wells would invalidate replicate
+comparisons.
+
+Two refeeds resolve to the same image
+-------------------------------------
+
+The refeed events are closer together than the image-acquisition interval.
+Correct the entered times or decide which single event should define that
+segment.
+
+``Cannot drop ... first recorded image after a refeed``
+-------------------------------------------------------
+
+That image is required as a segment denominator. Remove it from ``--drop-time``
+or remove/correct the associated ``--refeed-time``.
+
 Existing output directory warning
 ---------------------------------
 

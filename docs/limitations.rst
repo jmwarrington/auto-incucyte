@@ -7,6 +7,18 @@ Baseline must be measured
 The selected baseline is not interpolated. Every physical well must have exactly
 one finite, nonzero measurement at that recorded elapsed hour.
 
+Refeed normalization answers a segment-local question
+------------------------------------------------------
+
+Refeed-normalized fold change describes change since the most recent refeed
+baseline, not cumulative change since the beginning of the experiment. The
+program therefore retains the original globally normalized plots as a companion
+view. Interpret the two plot families according to the biological question.
+
+The entered refeed hour marks the intervention. The denominator is the first
+recorded image at or after that hour. Refeed timing and image timing should be
+documented with the experiment.
+
 Positive values are required for log2 plots
 --------------------------------------------
 
@@ -36,6 +48,8 @@ Best practices
 * Inspect warnings about missing controls or metadata wells.
 * Verify the metric name and units before interpreting the y-axis.
 * Inspect ``normalization_audit.csv`` for every run.
+* For refeeding experiments, archive ``refeed_schedule_used.csv`` and inspect
+  ``refeed_normalization_audit.csv``.
 * Archive ``plot_layout_used.csv`` so figure membership and controls remain
   reproducible.
 * Archive ``color_mapping_metadata_used.csv`` so exact plot styling remains

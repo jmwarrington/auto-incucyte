@@ -11,11 +11,16 @@ os.environ.setdefault("MPLCONFIGDIR", str(Path(tempfile.gettempdir()) / "auto_in
 
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 
 from auto_incucyte.analysis import (
+    HOURS_SINCE_REFEED_COLUMN,
     LOG2_PLOT_MEAN_COLUMN,
     NORMALIZED_COLUMN,
     PLOT_MEAN_COLUMN,
+    RefeedEvent,
+    SEGMENT_BASELINE_COLUMN,
+    SEGMENT_COLUMN,
     STYLE_METADATA_FIELDS,
     add_log2_fold_change,
     colormap_colors,
@@ -24,11 +29,14 @@ from auto_incucyte.analysis import (
     main,
     make_log2_plot_summary,
     make_plot_summary,
+    normalize_by_refeed_segments,
     normalize_per_well,
     parse_plate_export,
+    plot_sample,
     read_plot_layout,
     read_color_mapping_metadata,
     resolve_colormap_name,
+    resolve_refeed_events,
 )
 
 
@@ -83,6 +91,97 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(filtered["elapsed_hours"].tolist(), [0.0, 4.0])
         with self.assertRaisesRegex(ValueError, "Cannot drop baseline hour"):
             drop_time_points(raw, [0.0], 0.0)
+        with self.assertRaisesRegex(ValueError, "first recorded image after a refeed"):
+            drop_time_points(raw, [2.0], 0.0, [2.0])
+
+    def test_refeed_events_resolve_to_first_recorded_image_after_event(self):
+        raw = pd.DataFrame(
+            {
+                "elapsed_hours": [0.0, 47.0, 49.0, 119.0, 121.0],
+                "sample": ["A"] * 5,
+            }
+        )
+        events = resolve_refeed_events(raw, [48.0, 120.0], 0.0)
+        self.assertEqual(
+            events,
+            [RefeedEvent(48.0, 49.0), RefeedEvent(120.0, 121.0)],
+        )
+
+    def test_piecewise_refeed_normalization_resets_every_well(self):
+        times = [0.0, 24.0, 49.0, 72.0, 121.0, 144.0]
+        raw = pd.DataFrame(
+            {
+                "sample": ["A"] * 12,
+                "series_id": ["well1"] * 6 + ["well2"] * 6,
+                "elapsed_hours": times + times,
+                "raw_value": (
+                    [10.0, 20.0, 100.0, 200.0, 50.0, 100.0]
+                    + [20.0, 40.0, 200.0, 400.0, 100.0, 200.0]
+                ),
+            }
+        )
+        events = [RefeedEvent(48.0, 49.0), RefeedEvent(120.0, 121.0)]
+        normalized = normalize_by_refeed_segments(raw, 0.0, events)
+        self.assertTrue(
+            np.allclose(
+                normalized[NORMALIZED_COLUMN],
+                [1.0, 2.0, 1.0, 2.0, 1.0, 2.0] * 2,
+            )
+        )
+        self.assertEqual(set(normalized[SEGMENT_COLUMN]), {0, 1, 2})
+        self.assertEqual(
+            normalized.loc[
+                normalized["elapsed_hours"].eq(121.0), SEGMENT_BASELINE_COLUMN
+            ].unique().tolist(),
+            [121.0],
+        )
+        self.assertEqual(
+            normalized.loc[
+                normalized["elapsed_hours"].eq(144.0), HOURS_SINCE_REFEED_COLUMN
+            ].unique().tolist(),
+            [23.0],
+        )
+        summary = make_plot_summary(normalized, 0.0, [49.0, 121.0])
+        reset_rows = summary.loc[summary["elapsed_hours"].isin([0.0, 49.0, 121.0])]
+        self.assertTrue(np.allclose(reset_rows[PLOT_MEAN_COLUMN], 1.0))
+
+    def test_refeed_normalization_rejects_a_missing_well_baseline(self):
+        raw = pd.DataFrame(
+            {
+                "sample": ["A", "A", "A"],
+                "series_id": ["well1", "well1", "well2"],
+                "elapsed_hours": [0.0, 2.0, 0.0],
+                "raw_value": [10.0, 20.0, 10.0],
+            }
+        )
+        with self.assertRaisesRegex(ValueError, "Every physical replicate needs"):
+            normalize_by_refeed_segments(raw, 0.0, [RefeedEvent(1.0, 2.0)])
+
+    def test_refeed_plot_does_not_connect_across_segment_reset(self):
+        summary = pd.DataFrame(
+            {
+                "sample": ["A", "A", "A"],
+                "elapsed_hours": [0.0, 2.0, 4.0],
+                SEGMENT_COLUMN: [0, 1, 1],
+                "mean_fold_change": [1.0, 1.0, 2.0],
+                "sem_fold_change": [0.1, 0.1, 0.2],
+            }
+        )
+        fig, ax = plt.subplots()
+        try:
+            plot_sample(
+                ax,
+                summary,
+                "A",
+                color="navy",
+                marker="o",
+                segment_column=SEGMENT_COLUMN,
+            )
+            self.assertEqual(len(ax.lines), 2)
+            self.assertEqual(ax.lines[0].get_xdata().tolist(), [0.0])
+            self.assertEqual(ax.lines[1].get_xdata().tolist(), [2.0, 4.0])
+        finally:
+            plt.close(fig)
 
     def test_color_mapping_metadata_supports_spaces_and_exact_styles(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -250,6 +349,59 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(layout_used.loc[0, "control_1"], "Wild Type Control")
         self.assertEqual(layout_used.loc[1, "control_1"], "Wild Type Control")
         self.assertEqual(layout_used.loc[1, "control_2"], "Vehicle Control")
+
+    def test_refeed_command_writes_global_and_segmented_results(self):
+        example_export = Path(__file__).parents[1] / "examples" / "plate_1.txt"
+        example_metadata = (
+            Path(__file__).parents[1] / "examples" / "plate_metadata.csv"
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output = Path(temp_dir) / "refeed results"
+            status = main(
+                [
+                    "--metadata",
+                    str(example_metadata),
+                    str(example_export),
+                    "--controls",
+                    "WT, Vehicle",
+                    "--refeed-time",
+                    "1",
+                    "--output",
+                    str(output),
+                ],
+                prog="auto-incucyte",
+            )
+            png_names = {path.name for path in (output / "plots").glob("*.png")}
+            schedule = pd.read_csv(output / "tables" / "refeed_schedule_used.csv")
+            audit = pd.read_csv(
+                output / "tables" / "refeed_normalization_audit.csv"
+            )
+            refeed_data = pd.read_csv(
+                output / "tables" / "incucyte_refeed_plot_data.csv"
+            )
+            global_data = pd.read_csv(output / "tables" / "incucyte_plot_data.csv")
+            manifest = pd.read_csv(output / "plots" / "plot_manifest.csv")
+
+        self.assertEqual(status, 0)
+        self.assertEqual(len(png_names), 4)
+        self.assertIn("incucyte_normalized_01_all_sequences.png", png_names)
+        self.assertIn("incucyte_refeed_normalized_01_all_sequences.png", png_names)
+        self.assertEqual(schedule.loc[1, "requested_refeed_hour"], 1.0)
+        self.assertEqual(schedule.loc[1, SEGMENT_BASELINE_COLUMN], 2.0)
+        self.assertTrue(np.allclose(audit[PLOT_MEAN_COLUMN], 1.0))
+        self.assertTrue(
+            np.allclose(
+                refeed_data.loc[refeed_data["elapsed_hours"].eq(2.0), PLOT_MEAN_COLUMN],
+                1.0,
+            )
+        )
+        treatment_global = global_data.loc[
+            global_data["sample"].eq("Treatment")
+            & global_data["elapsed_hours"].eq(2.0),
+            PLOT_MEAN_COLUMN,
+        ].iloc[0]
+        self.assertEqual(treatment_global, 2.0)
+        self.assertEqual(set(manifest["lines_broken_at_refeeds"]), {False, True})
 
     def test_custom_filters_grouping_and_existing_output_are_safe(self):
         example_export = Path(__file__).parents[1] / "examples" / "plate_1.txt"

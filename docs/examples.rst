@@ -122,9 +122,26 @@ After editing ``color_mapping_metadata_template.csv``:
 The repository's ``examples/color_mapping_metadata.csv`` is a ready-to-run
 style file using the bundled synthetic data.
 
+Example 10: repeated cell refeeds
+---------------------------------
+
+This complete one-line command works in Mac Terminal and Windows PowerShell:
+
+.. code-block:: console
+
+   auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' --baseline-hour 0 --refeed-time '48, 120, 192' --output 'refeed_results'
+
+The program retains global linear/log2 plots and adds refeed-normalized
+linear/log2 plots. Each event uses the first recorded image at or after the
+entered hour, and ``refeed_schedule_used.csv`` records the exact mapping.
+
 Expected plotting behavior
 --------------------------
 
 At the baseline hour every sample is exactly 1.0 on the linear plot and 0.0 on
 the log2 plot. After baseline, increasing signal appears above 1.0, decreasing
 signal below 1.0, and unchanged signal near 1.0.
+
+In refeed-normalized plots those conditions apply independently to every
+segment. Lines are broken at resets so a normalization change is not drawn as a
+biological trajectory.

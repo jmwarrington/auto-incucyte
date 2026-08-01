@@ -36,6 +36,12 @@ Input and output
 ``--baseline-hour NUMBER``
    Per-well normalization hour. Default: 0.
 
+``--refeed-time '48, 120, 192'``
+   Comma-separated actual refeed event hours. For each event, the first
+   recorded image at or after that time becomes the next per-well baseline.
+   Decimal values are accepted and the option may be repeated.
+   ``--refeed-times`` is an alias.
+
 ``--metric NAME``
    Select one metric when exports contain several.
 
@@ -58,8 +64,8 @@ Selecting plots and data
 
 ``--drop-time '22, 55'``
    Remove comma-separated elapsed hours from normalized tables and every plot.
-   Raw reshaped tables retain them. May be repeated. The baseline cannot be
-   dropped.
+   Raw reshaped tables retain them. May be repeated. Neither the initial
+   baseline nor a resolved post-refeed baseline can be dropped.
 
 ``--hide-sample '70, NALM6'``
    Hide comma-separated samples from every plot while retaining their data in
@@ -97,6 +103,9 @@ Typography and labels
 ``--title-prefix TEXT``, ``--y-label TEXT``, ``--log2-title-prefix TEXT``, ``--log2-y-label TEXT``
    Customize figure text. Quote values containing spaces.
 
+``--refeed-title-prefix TEXT``, ``--refeed-y-label TEXT``, ``--refeed-log2-title-prefix TEXT``, ``--refeed-log2-y-label TEXT``
+   Customize only the refeed-normalized linear and log2 plot text.
+
 Legend, axes, and reference lines
 ---------------------------------
 
@@ -120,6 +129,13 @@ Legend, axes, and reference lines
 ``--h-line-color COLOR``, ``--h-line-style STYLE``, ``--h-line-width NUMBER``, ``--h-line-alpha NUMBER``
    Shared appearance of custom horizontal lines. Alpha ranges from 0 through 1.
    For a value beginning with dashes, use ``--h-line-style='--'``.
+
+``--refeed-line-color COLOR``, ``--refeed-line-style STYLE``, ``--refeed-line-width NUMBER``, ``--refeed-line-alpha NUMBER``
+   Appearance of the vertical refeed-event markers. Defaults are teal, dotted,
+   1.2 points, and 0.65 alpha.
+
+``--no-refeed-labels``
+   Keep the vertical refeed lines but hide their rotated text labels.
 
 Other plotting controls
 -----------------------

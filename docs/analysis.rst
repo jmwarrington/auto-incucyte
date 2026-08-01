@@ -27,6 +27,41 @@ Measurements before the selected baseline are retained in output tables but are
 not drawn on the plots. Every physical replicate must contain exactly one row at
 the chosen hour.
 
+Repeated refeed normalization
+-----------------------------
+
+For experiments in which cells are refed every few days, enter the elapsed
+hours of the refeed events:
+
+.. code-block:: console
+
+   auto-incucyte ... --refeed-time '48, 120, 192'
+
+For each event, the program selects the first recorded image at or after that
+time. That image becomes the new per-well denominator until the next refeed.
+Decimal event times are accepted, and the flag may be repeated.
+
+The original globally normalized linear/log2 plots are retained. Two additional
+refeed-normalized plot sets are written. Their lines are broken between
+segments, every segment begins at 1.0 or 0.0, and labeled vertical lines show
+the actual entered refeed events. Absolute elapsed time remains on the x-axis.
+
+The exact event-to-image mapping is recorded in
+``refeed_schedule_used.csv``. ``refeed_normalization_audit.csv`` proves the
+per-well and plotted resets for every sample and segment.
+
+.. important::
+
+   Enter the actual elapsed time of the refeed. The baseline is the first image
+   at or after that event. Every well must contain that resolved measurement,
+   and it cannot also be passed to ``--drop-time``.
+
+Customize the intervention markers with ``--refeed-line-color``,
+``--refeed-line-style``, ``--refeed-line-width``, and
+``--refeed-line-alpha``. Use ``--no-refeed-labels`` to hide only the marker
+text. Refeed-specific titles and y-axis labels also have dedicated options; see
+:doc:`command_reference`.
+
 Controls
 --------
 

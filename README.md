@@ -3,7 +3,8 @@
 `auto-incucyte` turns native Incucyte TXT/TSV exports into clean data tables,
 linear fold-change plots, log2 fold-change plots, and a normalization audit.
 It is simple by default and highly customizable when publication-ready styling
-is needed.
+is needed. Long experiments can be renormalized after each cell refeed while
+retaining the original globally normalized results.
 
 Each physical well is divided by its own measurement at the selected baseline
 hour. Replicate fold changes are then averaged at each time point and plotted as
@@ -214,6 +215,76 @@ auto-incucyte --metadata 'plate metadata.csv' '1=raw plate 1.txt' '2=raw plate 2
 Native tab-delimited `.txt` and `.tsv` exports are supported, as are legacy
 comma-delimited `.csv` copies.
 
+## Refeeding experiments
+
+Use `--refeed-time` when cells are refed during a long time course:
+
+```text
+auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' --baseline-hour 0 --refeed-time '48, 120, 192' --output 'refeed_results'
+```
+
+Enter the **actual elapsed hours when the cells were refed**. Decimal values
+such as `48.5` are accepted. For each entered time, auto-incucyte finds the
+first recorded Incucyte image at or after the refeed and uses that image as the
+new per-well baseline.
+
+For example:
+
+| Measurements | Each well is divided by its own value at |
+|---|---|
+| 0 to before the first post-48 h image | 0 h |
+| First post-48 h image to before the first post-120 h image | first image at or after 48 h |
+| First post-120 h image to before the first post-192 h image | first image at or after 120 h |
+| First post-192 h image onward | first image at or after 192 h |
+
+At every segment baseline, each physical well equals exactly `1.0` on the
+linear scale and `0.0` on the log2 scale. Replicates are averaged only after
+that per-well calculation.
+
+The program creates **both** interpretations:
+
+- Existing global plots normalized to `--baseline-hour`.
+- Additional refeed-normalized plots measuring change since the most recent
+  refeed.
+
+Refeed-normalized lines are deliberately broken between segments. A line is
+never drawn from the end of one normalization segment to the `1.0` reset in the
+next segment. Vertical labeled lines show the entered refeed events while the
+x-axis continues to show absolute experiment time.
+
+The terminal prints how every event was resolved. For example:
+
+```text
+Refeed at 48 h -> first recorded post-refeed image at 49 h
+```
+
+Important safeguards:
+
+- Every physical well must have a measurement at every resolved segment
+  baseline; otherwise the run stops with a clear error.
+- A resolved refeed baseline cannot also be removed with `--drop-time`.
+- Refeed times must occur after `--baseline-hour`, and there must be a recorded
+  image at or after each event.
+- If two refeed events resolve to the same image, the run stops rather than
+  silently creating an invalid segment.
+
+The option can also be repeated:
+
+```text
+auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' --refeed-time '48, 120' --refeed-time '192' --output 'refeed_results'
+```
+
+### Customize the vertical refeed markers
+
+```text
+auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' --refeed-time '48, 120' --refeed-line-color '#2F6F6F' --refeed-line-style=':' --refeed-line-width 1.5 --refeed-line-alpha 0.7 --output 'refeed_results'
+```
+
+Use `--no-refeed-labels` to keep the vertical lines but hide their text labels.
+Custom titles and y-axis labels are available through
+`--refeed-title-prefix`, `--refeed-y-label`, `--refeed-log2-title-prefix`, and
+`--refeed-log2-y-label`.
+
 ## Safe output folders
 
 The program never clears an output folder. If the folder already contains
@@ -398,6 +469,11 @@ incucyte_results/
 │   ├── incucyte_plot_data.csv
 │   ├── incucyte_log2_plot_data.csv
 │   ├── normalization_audit.csv
+│   ├── incucyte_refeed_normalized_long.csv
+│   ├── incucyte_refeed_plot_data.csv
+│   ├── incucyte_refeed_log2_plot_data.csv
+│   ├── refeed_normalization_audit.csv
+│   ├── refeed_schedule_used.csv
 │   ├── plot_layout_template.csv
 │   ├── plot_layout_used.csv
 │   ├── color_mapping_metadata_template.csv
@@ -405,8 +481,12 @@ incucyte_results/
 └── plots/
     ├── incucyte_normalized_01_all_sequences.png
     ├── incucyte_log2_01_all_sequences.png
+    ├── incucyte_refeed_normalized_01_all_sequences.png
+    ├── incucyte_refeed_log2_01_all_sequences.png
     └── plot_manifest.csv
 ```
+
+The files containing `refeed` are created only when `--refeed-time` is used.
 
 The audit table verifies that every sample is exactly 1.0 at baseline on the
 linear scale. The two plot-data tables contain the exact values sent to
@@ -417,7 +497,7 @@ Matplotlib.
 The repository includes synthetic, non-experimental data:
 
 ```text
-auto-incucyte --metadata 'examples/plate_metadata.csv' 'examples/plate_1.txt' --controls 'WT, Vehicle' --baseline-hour 0 --drop-time '2' --font 'DejaVu Sans' --legend-location 'upper left' --output 'example_results_customized'
+auto-incucyte --metadata 'examples/plate_metadata.csv' 'examples/plate_1.txt' --controls 'WT, Vehicle' --baseline-hour 0 --refeed-time '1' --font 'DejaVu Sans' --legend-location 'upper left' --output 'example_results_customized'
 ```
 
 It also includes `examples/color_mapping_metadata.csv`, which can be supplied

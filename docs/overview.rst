@@ -14,6 +14,8 @@ What can it do?
 * Combine multiple explicitly labeled plates.
 * Select one assay metric when an export contains several.
 * Normalize each well to a user-selected baseline hour.
+* Renormalize each well after repeated cell refeeds while retaining global
+  normalization as a companion view.
 * Calculate replicate mean and SEM on linear and log2 fold-change scales.
 * Put every line on one plot by default.
 * Define any number of named plots, their sequence lines, and per-plot controls
@@ -38,6 +40,12 @@ For every physical well independently:
 The fold changes—not the raw measurements—are averaged across replicate wells
 at each time point. Every valid well must therefore equal exactly 1.0 at the
 baseline. The log2 plot uses ``log2(fold change)`` and equals 0.0 at baseline.
+
+For a refeeding experiment, the denominator changes piecewise. Each
+measurement is divided by the same well's value at the most recent segment
+baseline: the initial ``--baseline-hour`` or the first recorded image at or
+after the most recent ``--refeed-time``. Every segment therefore begins at 1.0
+on the linear scale and 0.0 on the log2 scale.
 
 Workflow at a glance
 --------------------

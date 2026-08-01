@@ -14,6 +14,11 @@ Directory layout
    │   ├── incucyte_plot_data.csv
    │   ├── incucyte_log2_plot_data.csv
    │   ├── normalization_audit.csv
+   │   ├── incucyte_refeed_normalized_long.csv
+   │   ├── incucyte_refeed_plot_data.csv
+   │   ├── incucyte_refeed_log2_plot_data.csv
+   │   ├── refeed_normalization_audit.csv
+   │   ├── refeed_schedule_used.csv
    │   ├── plot_layout_template.csv
    │   ├── plot_layout_used.csv
    │   ├── color_mapping_metadata_template.csv
@@ -21,7 +26,12 @@ Directory layout
    └── plots/
        ├── incucyte_normalized_01_all_sequences.png
        ├── incucyte_log2_01_all_sequences.png
+       ├── incucyte_refeed_normalized_01_all_sequences.png
+       ├── incucyte_refeed_log2_01_all_sequences.png
        └── plot_manifest.csv
+
+The files containing ``refeed`` are created only when ``--refeed-time`` is
+used.
 
 Raw tables
 ----------
@@ -42,6 +52,22 @@ raw value, linear fold change, and log2 fold change.
 mean and SEM arrays supplied to Matplotlib. Use these files for downstream
 statistics or figure reproduction.
 
+Refeed-normalized tables
+------------------------
+
+``incucyte_refeed_normalized_long.csv`` retains every physical well and adds
+``normalization_segment``, ``segment_baseline_hour``, ``refeed_event_hour``,
+``hours_since_refeed``, the raw segment baseline, and segment-local fold change.
+
+``incucyte_refeed_plot_data.csv`` and
+``incucyte_refeed_log2_plot_data.csv`` contain the exact segment-local mean and
+SEM values plotted. The absolute ``elapsed_hours`` column remains the x-axis.
+
+``refeed_schedule_used.csv`` maps each entered event to the first recorded
+post-refeed image chosen as its baseline. ``refeed_normalization_audit.csv``
+shows that every individual well and plotted sample equals 1.0 at every segment
+baseline.
+
 Normalization audit
 -------------------
 
@@ -56,6 +82,8 @@ Plot manifest
 plot name, color map, scale, normalization description, plotted column, first
 plotted hour, SEM setting, font sizes, legend configuration, axis widths,
 horizontal lines, dropped times, hidden samples, and style-metadata source.
+When refeeds are used, it also records requested event times, resolved baseline
+images, marker styling, and whether lines were broken between segments.
 
 Plot-layout records
 -------------------
