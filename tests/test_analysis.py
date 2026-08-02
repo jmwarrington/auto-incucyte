@@ -19,6 +19,7 @@ from auto_incucyte.analysis import (
     NORMALIZED_COLUMN,
     PLOT_MEAN_COLUMN,
     RefeedEvent,
+    SampleCutoff,
     SEGMENT_BASELINE_COLUMN,
     SEGMENT_COLUMN,
     STYLE_METADATA_FIELDS,
@@ -26,17 +27,20 @@ from auto_incucyte.analysis import (
     colormap_colors,
     default_plot_definitions,
     drop_time_points,
+    drop_samples_after,
     main,
     make_log2_plot_summary,
     make_plot_summary,
     normalize_by_refeed_segments,
     normalize_per_well,
     parse_plate_export,
+    parse_sample_cutoffs,
     plot_sample,
     read_plot_layout,
     read_color_mapping_metadata,
     resolve_colormap_name,
     resolve_refeed_events,
+    style_plot_axis,
 )
 
 
@@ -145,17 +149,62 @@ class AnalysisTests(unittest.TestCase):
         reset_rows = summary.loc[summary["elapsed_hours"].isin([0.0, 49.0, 121.0])]
         self.assertTrue(np.allclose(reset_rows[PLOT_MEAN_COLUMN], 1.0))
 
+    def test_removed_sample_can_end_before_a_later_refeed_segment(self):
+        raw = pd.DataFrame(
+            {
+                "sample": ["A", "A", "A", "B", "B"],
+                "series_id": ["well1", "well1", "well1", "well2", "well2"],
+                "elapsed_hours": [0.0, 2.0, 4.0, 0.0, 1.0],
+                "raw_value": [10.0, 20.0, 30.0, 10.0, 15.0],
+            }
+        )
+        normalized = normalize_by_refeed_segments(
+            raw, 0.0, [RefeedEvent(1.5, 2.0)]
+        )
+        self.assertEqual(
+            set(normalized.loc[normalized["sample"].eq("B"), SEGMENT_COLUMN]),
+            {0},
+        )
+
     def test_refeed_normalization_rejects_a_missing_well_baseline(self):
         raw = pd.DataFrame(
             {
-                "sample": ["A", "A", "A"],
-                "series_id": ["well1", "well1", "well2"],
-                "elapsed_hours": [0.0, 2.0, 0.0],
-                "raw_value": [10.0, 20.0, 10.0],
+                "sample": ["A", "A", "A", "A"],
+                "series_id": ["well1", "well1", "well2", "well2"],
+                "elapsed_hours": [0.0, 2.0, 0.0, 4.0],
+                "raw_value": [10.0, 20.0, 10.0, 30.0],
             }
         )
         with self.assertRaisesRegex(ValueError, "Every physical replicate needs"):
             normalize_by_refeed_segments(raw, 0.0, [RefeedEvent(1.0, 2.0)])
+
+    def test_drop_samples_after_removes_zero_readings_and_keeps_earlier_data(self):
+        raw = pd.DataFrame(
+            {
+                "sample": ["Sample 72"] * 3 + ["Control With Spaces"] * 3,
+                "series_id": ["well1"] * 3 + ["well2"] * 3,
+                "elapsed_hours": [0.0, 96.0, 119.533333] * 2,
+                "raw_value": [10.0, 20.0, 0.0, 5.0, 7.5, 0.0],
+            }
+        )
+        cutoffs = parse_sample_cutoffs(
+            ["119.5: sample 72, Control With Spaces"],
+            ["Sample 72", "Control With Spaces"],
+            0.0,
+        )
+        self.assertEqual(
+            cutoffs,
+            [
+                SampleCutoff("Control With Spaces", 119.5),
+                SampleCutoff("Sample 72", 119.5),
+            ],
+        )
+        filtered, audit_rows = drop_samples_after(raw, cutoffs)
+        self.assertEqual(sorted(filtered["elapsed_hours"].unique()), [0.0, 96.0])
+        self.assertEqual(sum(row["rows_removed"] for row in audit_rows), 2)
+        normalized = normalize_per_well(filtered, 0.0)
+        log2_normalized = add_log2_fold_change(normalized, 0.0)
+        self.assertTrue(np.isfinite(log2_normalized["log2_fold_change"]).all())
 
     def test_refeed_plot_does_not_connect_across_segment_reset(self):
         summary = pd.DataFrame(
@@ -180,6 +229,41 @@ class AnalysisTests(unittest.TestCase):
             self.assertEqual(len(ax.lines), 2)
             self.assertEqual(ax.lines[0].get_xdata().tolist(), [0.0])
             self.assertEqual(ax.lines[1].get_xdata().tolist(), [2.0, 4.0])
+        finally:
+            plt.close(fig)
+
+    def test_refeed_label_is_near_the_bottom_of_the_plot(self):
+        fig, ax = plt.subplots()
+        try:
+            style_plot_axis(
+                ax,
+                title="Test",
+                y_label="Fold change",
+                baseline=1.0,
+                baseline_hour=0.0,
+                title_font_size=14.0,
+                axis_font_size=12.0,
+                tick_font_size=10.0,
+                legend_font_size=9.0,
+                legend_location="best",
+                legend_columns=1,
+                x_axis_linewidth=1.0,
+                y_axis_linewidth=1.0,
+                additional_hlines=[],
+                h_line_color="gray",
+                h_line_style="--",
+                h_line_width=1.0,
+                h_line_alpha=0.5,
+                refeed_events=[RefeedEvent(48.0, 49.0)],
+                refeed_line_color="teal",
+                refeed_line_style=":",
+                refeed_line_width=1.2,
+                refeed_line_alpha=0.65,
+                show_refeed_labels=True,
+            )
+            self.assertEqual(len(ax.texts), 1)
+            self.assertAlmostEqual(ax.texts[0].xy[1], 0.06)
+            self.assertEqual(ax.texts[0].get_verticalalignment(), "bottom")
         finally:
             plt.close(fig)
 
@@ -376,16 +460,19 @@ class AnalysisTests(unittest.TestCase):
             audit = pd.read_csv(
                 output / "tables" / "refeed_normalization_audit.csv"
             )
-            refeed_data = pd.read_csv(
-                output / "tables" / "incucyte_refeed_plot_data.csv"
+            refeed_data = pd.read_csv(output / "tables" / "incucyte_plot_data.csv")
+            refeed_log2_data = pd.read_csv(
+                output / "tables" / "incucyte_log2_plot_data.csv"
             )
-            global_data = pd.read_csv(output / "tables" / "incucyte_plot_data.csv")
+            global_data = pd.read_csv(
+                output / "tables" / "incucyte_global_plot_data.csv"
+            )
             manifest = pd.read_csv(output / "plots" / "plot_manifest.csv")
 
         self.assertEqual(status, 0)
         self.assertEqual(len(png_names), 4)
         self.assertIn("incucyte_normalized_01_all_sequences.png", png_names)
-        self.assertIn("incucyte_refeed_normalized_01_all_sequences.png", png_names)
+        self.assertIn("incucyte_global_normalized_01_all_sequences.png", png_names)
         self.assertEqual(schedule.loc[1, "requested_refeed_hour"], 1.0)
         self.assertEqual(schedule.loc[1, SEGMENT_BASELINE_COLUMN], 2.0)
         self.assertTrue(np.allclose(audit[PLOT_MEAN_COLUMN], 1.0))
@@ -395,12 +482,25 @@ class AnalysisTests(unittest.TestCase):
                 1.0,
             )
         )
+        self.assertTrue(
+            np.allclose(
+                refeed_log2_data.loc[
+                    refeed_log2_data["elapsed_hours"].eq(2.0),
+                    LOG2_PLOT_MEAN_COLUMN,
+                ],
+                0.0,
+            )
+        )
         treatment_global = global_data.loc[
             global_data["sample"].eq("Treatment")
             & global_data["elapsed_hours"].eq(2.0),
             PLOT_MEAN_COLUMN,
         ].iloc[0]
         self.assertEqual(treatment_global, 2.0)
+        standard_manifest = manifest.loc[
+            manifest["png"].str.startswith("incucyte_normalized_")
+        ]
+        self.assertTrue(standard_manifest["lines_broken_at_refeeds"].all())
         self.assertEqual(set(manifest["lines_broken_at_refeeds"]), {False, True})
 
     def test_custom_filters_grouping_and_existing_output_are_safe(self):

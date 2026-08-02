@@ -16,6 +16,8 @@ What can it do?
 * Normalize each well to a user-selected baseline hour.
 * Renormalize each well after repeated cell refeeds while retaining global
   normalization as a companion view.
+* End selected samples at their physical-removal time while retaining earlier
+  measurements and an auditable cutoff record.
 * Calculate replicate mean and SEM on linear and log2 fold-change scales.
 * Put every line on one plot by default.
 * Define any number of named plots, their sequence lines, and per-plot controls

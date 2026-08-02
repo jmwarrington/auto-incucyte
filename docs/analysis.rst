@@ -41,10 +41,12 @@ For each event, the program selects the first recorded image at or after that
 time. That image becomes the new per-well denominator until the next refeed.
 Decimal event times are accepted, and the flag may be repeated.
 
-The original globally normalized linear/log2 plots are retained. Two additional
-refeed-normalized plot sets are written. Their lines are broken between
-segments, every segment begins at 1.0 or 0.0, and labeled vertical lines show
-the actual entered refeed events. Absolute elapsed time remains on the x-axis.
+The standard ``incucyte_normalized_*`` and ``incucyte_log2_*`` outputs use this
+refeed normalization. Every retained sample is exactly 1.0 or 0.0 at each
+resolved refeed measurement. Additional ``incucyte_global_*`` outputs retain
+the original global-baseline interpretation. Refeed-normalized lines are
+broken between segments, and labeled vertical lines near the bottom show the
+actual entered events. Absolute elapsed time remains on the x-axis.
 
 The exact event-to-image mapping is recorded in
 ``refeed_schedule_used.csv``. ``refeed_normalization_audit.csv`` proves the
@@ -53,8 +55,9 @@ per-well and plotted resets for every sample and segment.
 .. important::
 
    Enter the actual elapsed time of the refeed. The baseline is the first image
-   at or after that event. Every well must contain that resolved measurement,
-   and it cannot also be passed to ``--drop-time``.
+   at or after that event. Every well with retained data in that segment must
+   contain the resolved measurement, and it cannot also be passed to
+   ``--drop-time``.
 
 Customize the intervention markers with ``--refeed-line-color``,
 ``--refeed-line-style``, ``--refeed-line-width``, and
@@ -131,6 +134,22 @@ data with:
 .. code-block:: console
 
    auto-incucyte ... --hide-sample '70, NALM6'
+
+Physically removed samples
+--------------------------
+
+When wells were removed from the plate and later readings are zero or invalid,
+retain the earlier data and end those samples at a specified elapsed hour:
+
+.. code-block:: console
+
+   auto-incucyte ... --drop-sample-after '119.5: 72, 74, 75, Shuffle'
+
+Everything at or after 119.5 hours is excluded for only those named samples.
+The cutoff need not exactly match a recorded imaging hour. Repeat the flag for
+different removal times. Quoting the whole rule preserves names containing
+spaces. ``sample_removal_cutoffs_used.csv`` records exactly what was excluded;
+the reshaped raw table is never changed.
 
 Color map
 ---------

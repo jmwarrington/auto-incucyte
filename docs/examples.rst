@@ -131,9 +131,20 @@ This complete one-line command works in Mac Terminal and Windows PowerShell:
 
    auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' --baseline-hour 0 --refeed-time '48, 120, 192' --output 'refeed_results'
 
-The program retains global linear/log2 plots and adds refeed-normalized
-linear/log2 plots. Each event uses the first recorded image at or after the
-entered hour, and ``refeed_schedule_used.csv`` records the exact mapping.
+The standard linear/log2 plots are refeed-normalized and reset to exactly 1.0
+and 0.0. Additional ``incucyte_global_*`` plots retain global normalization.
+Each event uses the first recorded image at or after the entered hour, and
+``refeed_schedule_used.csv`` records the exact mapping.
+
+Example 11: samples physically removed from the plate
+------------------------------------------------------
+
+.. code-block:: console
+
+   auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' --drop-sample-after '119.5: 72, 74, 75, Shuffle' --output 'sample_removal_results'
+
+The listed samples retain all measurements before 119.5 hours. Their readings
+at 119.5 hours and later are excluded before normalization and log2 conversion.
 
 Expected plotting behavior
 --------------------------

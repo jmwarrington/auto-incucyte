@@ -33,7 +33,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-SCRIPT_VERSION = "0.4.0"
+SCRIPT_VERSION = "0.4.1"
 PACKAGE_GITHUB_URL = "https://github.com/jmwarrington/auto-incucyte.git"
 BASELINE_ATOL = 1e-9
 NORMALIZED_COLUMN = "fold_change"
@@ -95,6 +95,14 @@ class RefeedEvent:
 
     event_hour: float
     baseline_hour: float
+
+
+@dataclasses.dataclass(frozen=True)
+class SampleCutoff:
+    """A sample and the elapsed hour when its remaining data are excluded."""
+
+    sample: str
+    cutoff_hour: float
 
 
 def clean(text: object) -> str:
@@ -839,10 +847,10 @@ def normalize_by_refeed_segments(
             f"{duplicate_baselines.head(12).to_dict()}"
         )
 
-    all_trajectories = out[trajectory_keys].drop_duplicates().copy()
-    expected = all_trajectories.merge(
-        pd.DataFrame({SEGMENT_COLUMN: range(len(baseline_hours))}), how="cross"
-    )
+    # A physically removed sample is not expected to have baselines in later
+    # segments. It still must have a baseline for every segment containing any
+    # of its retained measurements.
+    expected = out[trajectory_keys + [SEGMENT_COLUMN]].drop_duplicates()
     observed = baseline_rows[trajectory_keys + [SEGMENT_COLUMN]].drop_duplicates()
     missing = expected.merge(
         observed,
@@ -856,8 +864,9 @@ def normalize_by_refeed_segments(
     if not missing.empty:
         schedule_text = ", ".join(f"{hour:g}" for hour in baseline_hours)
         raise ValueError(
-            "Every physical replicate needs a measurement at every resolved refeed "
-            f"baseline ({schedule_text} h). Missing examples:\n"
+            "Every physical replicate needs a baseline measurement for each "
+            "normalization segment containing retained data. Resolved baselines "
+            f"are {schedule_text} h. Missing examples:\n"
             + missing.head(12).to_string(index=False)
         )
 
@@ -1125,6 +1134,118 @@ def parse_refeed_times(values: list[str] | None) -> list[float]:
         if time not in times:
             times.append(time)
     return sorted(times)
+
+
+def parse_sample_cutoffs(
+    values: list[str] | None,
+    available_samples: list[str],
+    baseline_hour: float,
+) -> list[SampleCutoff]:
+    """Parse ``HOUR: sample 1, sample 2`` physical-removal rules."""
+    if not values:
+        return []
+
+    cutoff_by_sample: dict[str, float] = {}
+    for value in values:
+        if ":" not in value:
+            raise ValueError(
+                "Invalid --drop-sample-after value. Put the time first, then a "
+                "colon and the sample names, for example "
+                "--drop-sample-after '119.5: 72, 74, Shuffle'."
+            )
+        time_text, names_text = value.split(":", 1)
+        try:
+            cutoff_hour = float(clean(time_text))
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid cutoff time {clean(time_text)!r} in --drop-sample-after."
+            ) from exc
+        if not math.isfinite(cutoff_hour):
+            raise ValueError("--drop-sample-after cutoff times must be finite numbers")
+        if cutoff_hour <= baseline_hour + BASELINE_ATOL:
+            raise ValueError(
+                "Every --drop-sample-after cutoff must occur after "
+                f"--baseline-hour ({baseline_hour:g} h)."
+            )
+
+        requested_names = [
+            clean(name) for name in names_text.split(",") if clean(name)
+        ]
+        if not requested_names:
+            raise ValueError(
+                f"No sample names were provided after {cutoff_hour:g}: in "
+                "--drop-sample-after."
+            )
+        for requested_name in requested_names:
+            try:
+                sample = resolve_sample_name(requested_name, available_samples)
+            except ValueError as exc:
+                available = ", ".join(available_samples)
+                raise ValueError(
+                    f"--drop-sample-after sample {requested_name!r} was not found. "
+                    f"Available sample names: {available}"
+                ) from exc
+            previous = cutoff_by_sample.get(sample)
+            cutoff_by_sample[sample] = (
+                cutoff_hour if previous is None else min(previous, cutoff_hour)
+            )
+
+    return [
+        SampleCutoff(sample, cutoff_hour)
+        for sample, cutoff_hour in sorted(
+            cutoff_by_sample.items(), key=lambda item: (item[1], natural_key(item[0]))
+        )
+    ]
+
+
+def drop_samples_after(
+    raw: pd.DataFrame,
+    cutoffs: list[SampleCutoff],
+) -> tuple[pd.DataFrame, list[dict[str, object]]]:
+    """Discard selected samples at and after their physical-removal times."""
+    if not cutoffs:
+        return raw, []
+
+    drop_mask = np.zeros(len(raw), dtype=bool)
+    audit_rows: list[dict[str, object]] = []
+    elapsed = raw["elapsed_hours"].to_numpy(dtype=float)
+    for cutoff in cutoffs:
+        sample_mask = raw["sample"].eq(cutoff.sample).to_numpy(dtype=bool)
+        rule_mask = sample_mask & (elapsed >= cutoff.cutoff_hour - BASELINE_ATOL)
+        removed_times = raw.loc[rule_mask, "elapsed_hours"].astype(float)
+        retained_times = raw.loc[sample_mask & ~rule_mask, "elapsed_hours"].astype(float)
+        if removed_times.empty:
+            warnings.warn(
+                f"--drop-sample-after found no {cutoff.sample!r} measurements at "
+                f"or after {cutoff.cutoff_hour:g} h.",
+                stacklevel=2,
+            )
+        drop_mask |= rule_mask
+        audit_rows.append(
+            {
+                "sample": cutoff.sample,
+                "requested_cutoff_hour": cutoff.cutoff_hour,
+                "first_removed_recorded_hour": (
+                    float(removed_times.min()) if not removed_times.empty else ""
+                ),
+                "last_retained_recorded_hour": (
+                    float(retained_times.max()) if not retained_times.empty else ""
+                ),
+                "rows_removed": int(rule_mask.sum()),
+                "rule": "exclude this sample at and after requested_cutoff_hour",
+            }
+        )
+
+    filtered = raw.loc[~drop_mask].copy()
+    if filtered.empty:
+        raise ValueError("--drop-sample-after removed every measurement")
+    print(
+        "Dropped sample data at/after removal time: "
+        + "; ".join(
+            f"{cutoff.sample} at {cutoff.cutoff_hour:g} h" for cutoff in cutoffs
+        )
+    )
+    return filtered, audit_rows
 
 
 def resolve_refeed_events(
@@ -1711,13 +1832,13 @@ def style_plot_axis(
         if show_refeed_labels:
             ax.annotate(
                 f"Refeed {event.event_hour:g} h",
-                xy=(event.event_hour, 0.98),
+                xy=(event.event_hour, 0.06),
                 xycoords=("data", "axes fraction"),
                 xytext=(3, 0),
                 textcoords="offset points",
                 rotation=90,
                 ha="left",
-                va="top",
+                va="bottom",
                 fontsize=tick_font_size,
                 color=refeed_line_color,
                 alpha=min(1.0, refeed_line_alpha + 0.2),
@@ -2147,6 +2268,19 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--drop-sample-after",
+        "--drop-samples-after",
+        dest="drop_sample_after",
+        action="append",
+        default=None,
+        metavar="'HOUR: NAMES'",
+        help=(
+            "Exclude selected samples at and after a physical-removal time, for "
+            "example --drop-sample-after '119.5: 72, 74, Shuffle'. Earlier data "
+            "are retained. May be repeated for different removal times."
+        ),
+    )
+    parser.add_argument(
         "--metric", default=None, help="Metric to select when exports contain several"
     )
     parser.add_argument("--no-sem", action="store_true", help="Do not draw SEM ribbons")
@@ -2353,6 +2487,14 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
         "incucyte_raw_summary.csv",
     )
     raw = prepare_input(long_path, args.metric)
+    input_samples = sorted(
+        [str(sample) for sample in raw["sample"].unique()], key=natural_key
+    )
+    sample_cutoffs = parse_sample_cutoffs(
+        args.drop_sample_after,
+        input_samples,
+        args.baseline_hour,
+    )
     requested_refeed_times = parse_refeed_times(args.refeed_time)
     refeed_events = resolve_refeed_events(
         raw, requested_refeed_times, args.baseline_hour
@@ -2370,11 +2512,37 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
         args.baseline_hour,
         [event.baseline_hour for event in refeed_events],
     )
+    raw, sample_cutoff_rows = drop_samples_after(raw, sample_cutoffs)
+    if sample_cutoff_rows:
+        write_csv(
+            tables_dir / "sample_removal_cutoffs_used.csv",
+            sample_cutoff_rows,
+            [
+                "sample",
+                "requested_cutoff_hour",
+                "first_removed_recorded_hour",
+                "last_retained_recorded_hour",
+                "rows_removed",
+                "rule",
+            ],
+        )
 
-    normalized = normalize_per_well(raw, args.baseline_hour)
-    normalized = add_log2_fold_change(normalized, args.baseline_hour)
-    summary = make_plot_summary(normalized, args.baseline_hour)
-    log2_summary = make_log2_plot_summary(normalized, args.baseline_hour)
+    global_normalized = normalize_per_well(raw, args.baseline_hour)
+    global_normalized = add_log2_fold_change(
+        global_normalized, args.baseline_hour
+    )
+    global_summary = make_plot_summary(global_normalized, args.baseline_hour)
+    global_log2_summary = make_log2_plot_summary(
+        global_normalized, args.baseline_hour
+    )
+    global_audit = make_audit(
+        global_normalized, global_summary, args.baseline_hour
+    )
+
+    normalized = global_normalized
+    summary = global_summary
+    log2_summary = global_log2_summary
+    audit = global_audit
 
     refeed_normalized: pd.DataFrame | None = None
     refeed_summary: pd.DataFrame | None = None
@@ -2406,27 +2574,36 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
             args.baseline_hour,
             refeed_events,
         )
+        # When --refeed-time is used, the familiar standard filenames represent
+        # the requested piecewise normalization. Global-baseline results remain
+        # available under explicit incucyte_global_* names.
+        normalized = refeed_normalized
+        summary = refeed_summary
+        log2_summary = refeed_log2_summary
+        audit = refeed_audit
 
     plots_dir.mkdir(parents=True, exist_ok=True)
 
     normalized.to_csv(tables_dir / "incucyte_normalized_long.csv", index=False)
     summary.to_csv(tables_dir / "incucyte_plot_data.csv", index=False)
     log2_summary.to_csv(tables_dir / "incucyte_log2_plot_data.csv", index=False)
-    audit = make_audit(normalized, summary, args.baseline_hour)
     audit.to_csv(tables_dir / "normalization_audit.csv", index=False)
     if refeed_events:
         assert refeed_normalized is not None
         assert refeed_summary is not None
         assert refeed_log2_summary is not None
         assert refeed_audit is not None
-        refeed_normalized.to_csv(
-            tables_dir / "incucyte_refeed_normalized_long.csv", index=False
+        global_normalized.to_csv(
+            tables_dir / "incucyte_global_normalized_long.csv", index=False
         )
-        refeed_summary.to_csv(
-            tables_dir / "incucyte_refeed_plot_data.csv", index=False
+        global_summary.to_csv(
+            tables_dir / "incucyte_global_plot_data.csv", index=False
         )
-        refeed_log2_summary.to_csv(
-            tables_dir / "incucyte_refeed_log2_plot_data.csv", index=False
+        global_log2_summary.to_csv(
+            tables_dir / "incucyte_global_log2_plot_data.csv", index=False
+        )
+        global_audit.to_csv(
+            tables_dir / "global_normalization_audit.csv", index=False
         )
         refeed_audit.to_csv(
             tables_dir / "refeed_normalization_audit.csv", index=False
@@ -2539,16 +2716,55 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     )
     write_color_mapping_csv(style_used_path, plotted_samples, plot_styles)
 
-    title_prefix = args.title_prefix or f"Incucyte — normalized to {args.baseline_hour:g} h"
-    log2_title_prefix = args.log2_title_prefix or (
+    global_title_prefix = args.title_prefix or (
+        f"Incucyte — globally normalized to {args.baseline_hour:g} h"
+    )
+    global_log2_title_prefix = args.log2_title_prefix or (
         f"Incucyte — log2 fold change relative to {args.baseline_hour:g} h"
     )
-    refeed_title_prefix = args.refeed_title_prefix or (
-        "Incucyte — normalized to the most recent refeed"
-    )
-    refeed_log2_title_prefix = args.refeed_log2_title_prefix or (
-        "Incucyte — log2 fold change since the most recent refeed"
-    )
+    if refeed_events:
+        title_prefix = args.refeed_title_prefix or args.title_prefix or (
+            "Incucyte — normalized to the most recent refeed"
+        )
+        log2_title_prefix = (
+            args.refeed_log2_title_prefix
+            or args.log2_title_prefix
+            or "Incucyte — log2 fold change since the most recent refeed"
+        )
+        y_label = args.refeed_y_label
+        log2_y_label = args.refeed_log2_y_label
+        active_segment_column: str | None = SEGMENT_COLUMN
+        refeed_baseline_text = ", ".join(
+            f"{event.baseline_hour:g}" for event in refeed_events
+        )
+        normalization_description = (
+            "each physical well divided by its own measurement at the most "
+            "recent segment baseline; post-refeed baseline hours: "
+            + refeed_baseline_text
+        )
+        log2_normalization_description = (
+            "per-well log2(raw value / same well's value at the most recent "
+            "segment baseline); post-refeed baseline hours: "
+            + refeed_baseline_text
+        )
+        scale_name = "refeed-segment linear fold change"
+        log2_scale_name = "refeed-segment log2 fold change"
+    else:
+        title_prefix = global_title_prefix
+        log2_title_prefix = global_log2_title_prefix
+        y_label = args.y_label
+        log2_y_label = args.log2_y_label
+        active_segment_column = None
+        normalization_description = (
+            f"each physical well divided by its own raw value at "
+            f"{args.baseline_hour:g} h"
+        )
+        log2_normalization_description = (
+            f"per-well log2(raw value / same well's raw value at "
+            f"{args.baseline_hour:g} h), then averaged across replicates"
+        )
+        scale_name = "linear fold change"
+        log2_scale_name = "log2 fold change"
     refeed_marker_options = {
         "refeed_events": refeed_events,
         "refeed_line_color": args.refeed_line_color,
@@ -2564,15 +2780,13 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
         output_dir=plots_dir,
         filename_prefix="incucyte_normalized",
         title_prefix=title_prefix,
-        y_label=args.y_label,
+        y_label=y_label,
         mean_column=PLOT_MEAN_COLUMN,
         sem_column=PLOT_SEM_COLUMN,
         baseline=1.0,
         baseline_hour=args.baseline_hour,
-        normalization_description=(
-            f"each physical well divided by its own raw value at {args.baseline_hour:g} h"
-        ),
-        scale_name="linear fold change",
+        normalization_description=normalization_description,
+        scale_name=scale_name,
         show_sem=not args.no_sem,
         dpi=args.dpi,
         plot_styles=plot_styles,
@@ -2590,6 +2804,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
         h_line_style=args.h_line_style,
         h_line_width=args.h_line_width,
         h_line_alpha=args.h_line_alpha,
+        segment_column=active_segment_column,
         **refeed_marker_options,
     )
     manifest.extend(
@@ -2599,16 +2814,13 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
             output_dir=plots_dir,
             filename_prefix="incucyte_log2",
             title_prefix=log2_title_prefix,
-            y_label=args.log2_y_label,
+            y_label=log2_y_label,
             mean_column=LOG2_PLOT_MEAN_COLUMN,
             sem_column=LOG2_PLOT_SEM_COLUMN,
             baseline=0.0,
             baseline_hour=args.baseline_hour,
-            normalization_description=(
-                f"per-well log2(raw value / same well's raw value at {args.baseline_hour:g} h), "
-                "then averaged across replicates"
-            ),
-            scale_name="log2 fold change",
+            normalization_description=log2_normalization_description,
+            scale_name=log2_scale_name,
             show_sem=not args.no_sem,
             dpi=args.dpi,
             plot_styles=plot_styles,
@@ -2626,33 +2838,28 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
             h_line_style=args.h_line_style,
             h_line_width=args.h_line_width,
             h_line_alpha=args.h_line_alpha,
+            segment_column=active_segment_column,
             **refeed_marker_options,
         )
     )
     if refeed_events:
-        assert refeed_summary is not None
-        assert refeed_log2_summary is not None
-        refeed_baseline_text = ", ".join(
-            f"{event.baseline_hour:g}" for event in refeed_events
-        )
         manifest.extend(
             create_plot_set(
-                refeed_summary,
+                global_summary,
                 plot_definitions,
                 output_dir=plots_dir,
-                filename_prefix="incucyte_refeed_normalized",
-                title_prefix=refeed_title_prefix,
-                y_label=args.refeed_y_label,
+                filename_prefix="incucyte_global_normalized",
+                title_prefix=global_title_prefix,
+                y_label=args.y_label,
                 mean_column=PLOT_MEAN_COLUMN,
                 sem_column=PLOT_SEM_COLUMN,
                 baseline=1.0,
                 baseline_hour=args.baseline_hour,
                 normalization_description=(
-                    "each physical well divided by its own measurement at the "
-                    "most recent segment baseline; post-refeed baseline hours: "
-                    + refeed_baseline_text
+                    f"each physical well divided by its own raw value at "
+                    f"{args.baseline_hour:g} h"
                 ),
-                scale_name="refeed-segment linear fold change",
+                scale_name="global linear fold change",
                 show_sem=not args.no_sem,
                 dpi=args.dpi,
                 plot_styles=plot_styles,
@@ -2670,28 +2877,26 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
                 h_line_style=args.h_line_style,
                 h_line_width=args.h_line_width,
                 h_line_alpha=args.h_line_alpha,
-                segment_column=SEGMENT_COLUMN,
                 **refeed_marker_options,
             )
         )
         manifest.extend(
             create_plot_set(
-                refeed_log2_summary,
+                global_log2_summary,
                 plot_definitions,
                 output_dir=plots_dir,
-                filename_prefix="incucyte_refeed_log2",
-                title_prefix=refeed_log2_title_prefix,
-                y_label=args.refeed_log2_y_label,
+                filename_prefix="incucyte_global_log2",
+                title_prefix=global_log2_title_prefix,
+                y_label=args.log2_y_label,
                 mean_column=LOG2_PLOT_MEAN_COLUMN,
                 sem_column=LOG2_PLOT_SEM_COLUMN,
                 baseline=0.0,
                 baseline_hour=args.baseline_hour,
                 normalization_description=(
-                    "per-well log2(raw value / same well's value at the most "
-                    "recent segment baseline); post-refeed baseline hours: "
-                    + refeed_baseline_text
+                    f"per-well log2(raw value / same well's raw value at "
+                    f"{args.baseline_hour:g} h), then averaged across replicates"
                 ),
-                scale_name="refeed-segment log2 fold change",
+                scale_name="global log2 fold change",
                 show_sem=not args.no_sem,
                 dpi=args.dpi,
                 plot_styles=plot_styles,
@@ -2709,7 +2914,6 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
                 h_line_style=args.h_line_style,
                 h_line_width=args.h_line_width,
                 h_line_alpha=args.h_line_alpha,
-                segment_column=SEGMENT_COLUMN,
                 **refeed_marker_options,
             )
         )
@@ -2737,6 +2941,9 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
         "refeed_line_width": args.refeed_line_width,
         "refeed_line_alpha": args.refeed_line_alpha,
         "refeed_labels_shown": not args.no_refeed_labels,
+        "sample_removal_cutoffs": ";".join(
+            f"{cutoff.sample}@{cutoff.cutoff_hour:g}" for cutoff in sample_cutoffs
+        ),
         "dropped_times": ";".join(f"{value:g}" for value in dropped_times),
         "hidden_samples": ";".join(hidden_samples),
         "color_mapping_metadata": (
@@ -2750,23 +2957,35 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     pd.DataFrame(manifest).to_csv(plots_dir / "plot_manifest.csv", index=False)
 
     baseline_error = np.abs(audit[PLOT_MEAN_COLUMN].to_numpy(dtype=float) - 1.0).max()
-    log2_baseline = log2_summary.loc[
-        np.isclose(
+    if SEGMENT_BASELINE_COLUMN in log2_summary.columns:
+        log2_reset_mask = np.isclose(
+            log2_summary["elapsed_hours"].to_numpy(dtype=float),
+            log2_summary[SEGMENT_BASELINE_COLUMN].to_numpy(dtype=float),
+            atol=BASELINE_ATOL,
+            rtol=0.0,
+        )
+    else:
+        log2_reset_mask = np.isclose(
             log2_summary["elapsed_hours"].to_numpy(dtype=float),
             args.baseline_hour,
             atol=BASELINE_ATOL,
             rtol=0.0,
-        ),
-        LOG2_PLOT_MEAN_COLUMN,
-    ]
+        )
+    log2_baseline = log2_summary.loc[log2_reset_mask, LOG2_PLOT_MEAN_COLUMN]
     log2_baseline_error = np.abs(log2_baseline.to_numpy(dtype=float)).max()
     print(f"Script version: {SCRIPT_VERSION}")
     print(f"Font selected: {selected_font}")
     print(f"Sequence color map: {cmap_name}")
-    print(
-        f"Normalization formula: normalized value = raw_value / "
-        f"same well's raw value at {args.baseline_hour:g} h"
-    )
+    if refeed_events:
+        print(
+            "Normalization formula for standard outputs: raw_value / same well's "
+            "value at the most recent initial or post-refeed baseline"
+        )
+    else:
+        print(
+            f"Normalization formula: normalized value = raw_value / "
+            f"same well's raw value at {args.baseline_hour:g} h"
+        )
     print(f"Linear y column sent to Matplotlib: {PLOT_MEAN_COLUMN}")
     print(f"Log2 y column sent to Matplotlib: {LOG2_PLOT_MEAN_COLUMN}")
     print(
@@ -2797,12 +3016,17 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
             f"Maximum refeed-segment baseline error from 1.0: {refeed_error:.3g}"
         )
         print(
-            "Created global linear/log2 plots and separate refeed-normalized "
-            "linear/log2 plots."
+            "Standard incucyte_normalized/incucyte_log2 outputs use the refeed "
+            "resets; separate incucyte_global_* outputs retain global normalization."
         )
         print(
             "Refeed schedule: "
             f"{(tables_dir / 'refeed_schedule_used.csv').resolve()}"
+        )
+    if sample_cutoffs:
+        print(
+            "Sample-removal record: "
+            f"{(tables_dir / 'sample_removal_cutoffs_used.csv').resolve()}"
         )
     print(f"Editable plot layout template: {template_path.resolve()}")
     print(f"Editable color/style template: {style_template_path.resolve()}")

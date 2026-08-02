@@ -241,11 +241,14 @@ At every segment baseline, each physical well equals exactly `1.0` on the
 linear scale and `0.0` on the log2 scale. Replicates are averaged only after
 that per-well calculation.
 
-The program creates **both** interpretations:
+The program creates **both** interpretations, with the requested refeed view in
+the familiar standard filenames:
 
-- Existing global plots normalized to `--baseline-hour`.
-- Additional refeed-normalized plots measuring change since the most recent
-  refeed.
+- `incucyte_normalized_*` and `incucyte_log2_*` reset after every refeed. At
+  each resolved refeed measurement, **all retained samples equal exactly 1.0
+  and 0.0**, respectively.
+- `incucyte_global_*` provides the additional comparison normalized only to
+  `--baseline-hour`.
 
 Refeed-normalized lines are deliberately broken between segments. A line is
 never drawn from the end of one normalization segment to the `1.0` reset in the
@@ -260,8 +263,9 @@ Refeed at 48 h -> first recorded post-refeed image at 49 h
 
 Important safeguards:
 
-- Every physical well must have a measurement at every resolved segment
-  baseline; otherwise the run stops with a clear error.
+- Every physical well must have a baseline for each segment in which it has
+  retained data. Samples intentionally ended with `--drop-sample-after` are
+  not required at later refeed baselines.
 - A resolved refeed baseline cannot also be removed with `--drop-time`.
 - Refeed times must occur after `--baseline-hour`, and there must be a recorded
   image at or after each event.
@@ -281,6 +285,9 @@ auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' --refeed-time '4
 ```
 
 Use `--no-refeed-labels` to keep the vertical lines but hide their text labels.
+The labels appear near the bottom of the graph so they do not cover the top of
+the data.
+
 Custom titles and y-axis labels are available through
 `--refeed-title-prefix`, `--refeed-y-label`, `--refeed-log2-title-prefix`, and
 `--refeed-log2-y-label`.
@@ -339,6 +346,30 @@ auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' --hide-sample '7
 
 Matching is case-insensitive, spaces are supported, and the option may be
 repeated.
+
+### Physically removed samples or bad zero readings
+
+If a sample was physically removed from the plate, exclude that sample from the
+removal time onward while retaining its earlier measurements:
+
+```text
+auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' --drop-sample-after '119.5: 72, 74, 75, Shuffle' --output 'sample_removal_results'
+```
+
+The time comes first, followed by a colon and a comma-separated list of sample
+names. Names containing spaces work when the entire value is quoted. The
+cutoff does not need to exactly match an imaging time: every measurement at or
+after the entered hour is excluded.
+
+Repeat the option when samples were removed at different times:
+
+```text
+auto-incucyte --metadata 'plate metadata.csv' 'raw plate 1.txt' --drop-sample-after '96: Sample A, Sample B' --drop-sample-after '119.5: Sample C, Vehicle Control' --output 'sample_removal_results'
+```
+
+The program writes `tables/sample_removal_cutoffs_used.csv` showing the first
+recorded time removed, last retained time, and number of excluded rows. The raw
+`incucyte_long.csv` remains unchanged so the filtering decision is auditable.
 
 ### Choose exact plot contents and names
 
@@ -469,11 +500,13 @@ incucyte_results/
 │   ├── incucyte_plot_data.csv
 │   ├── incucyte_log2_plot_data.csv
 │   ├── normalization_audit.csv
-│   ├── incucyte_refeed_normalized_long.csv
-│   ├── incucyte_refeed_plot_data.csv
-│   ├── incucyte_refeed_log2_plot_data.csv
+│   ├── incucyte_global_normalized_long.csv
+│   ├── incucyte_global_plot_data.csv
+│   ├── incucyte_global_log2_plot_data.csv
+│   ├── global_normalization_audit.csv
 │   ├── refeed_normalization_audit.csv
 │   ├── refeed_schedule_used.csv
+│   ├── sample_removal_cutoffs_used.csv
 │   ├── plot_layout_template.csv
 │   ├── plot_layout_used.csv
 │   ├── color_mapping_metadata_template.csv
@@ -481,16 +514,18 @@ incucyte_results/
 └── plots/
     ├── incucyte_normalized_01_all_sequences.png
     ├── incucyte_log2_01_all_sequences.png
-    ├── incucyte_refeed_normalized_01_all_sequences.png
-    ├── incucyte_refeed_log2_01_all_sequences.png
+    ├── incucyte_global_normalized_01_all_sequences.png
+    ├── incucyte_global_log2_01_all_sequences.png
     └── plot_manifest.csv
 ```
 
-The files containing `refeed` are created only when `--refeed-time` is used.
+The `global` and `refeed` audit files are created only when `--refeed-time` is
+used. The sample-removal record is created only when `--drop-sample-after` is
+used.
 
-The audit table verifies that every sample is exactly 1.0 at baseline on the
-linear scale. The two plot-data tables contain the exact values sent to
-Matplotlib.
+The audit table verifies that every retained sample is exactly 1.0 at every
+applicable baseline on the linear scale. The two plot-data tables contain the
+exact values sent to Matplotlib.
 
 ## Complete reproducible example
 

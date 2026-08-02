@@ -102,6 +102,22 @@ Requested drop time was not found
 Inspect the exact ``elapsed_hours`` values in ``incucyte_long.csv``. This is a
 warning; the analysis continues and reports which requested values were absent.
 
+``Log2 fold change requires every normalized measurement to be positive``
+-------------------------------------------------------------------------
+
+If the listed samples were physically removed from the plate, the instrument
+may have exported zero readings afterward. End those samples at the removal
+time, for example:
+
+.. code-block:: console
+
+   auto-incucyte ... --drop-sample-after '119.5: 72, 74, 75, Shuffle'
+
+This retains their earlier data and excludes readings at or after the cutoff.
+Do not use this merely to hide genuine biological zero values; log2 is
+mathematically undefined for those values and the scientific handling must be
+chosen explicitly.
+
 ``Cannot drop baseline hour``
 -----------------------------
 
@@ -118,10 +134,11 @@ Missing refeed baseline for a physical well
 -------------------------------------------
 
 The program found the first recorded image at or after the event, but at least
-one physical well lacks a value at that elapsed hour. Inspect
-``incucyte_long.csv`` and the source export. The run stops because silently
-using different baseline images for different wells would invalidate replicate
-comparisons.
+one physical well that has later retained data lacks a value at that elapsed
+hour. Inspect ``incucyte_long.csv`` and the source export. The run stops rather
+than silently using different baseline images for different wells; that would
+invalidate replicate comparisons. A sample intentionally removed before this
+segment should be ended with ``--drop-sample-after``.
 
 Two refeeds resolve to the same image
 -------------------------------------

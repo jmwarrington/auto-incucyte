@@ -71,6 +71,13 @@ Selecting plots and data
    Hide comma-separated samples from every plot while retaining their data in
    the tables. Matching is case-insensitive and the option may be repeated.
 
+``--drop-sample-after '119.5: 72, 74, 75, Shuffle'``
+   Retain each named sample before the cutoff and exclude it at and after that
+   elapsed hour. Use this when samples were physically removed and later plate
+   readings are zero or invalid. The cutoff need not exactly match an imaging
+   time. Quote the complete rule, and repeat the option for different cutoffs.
+   Names containing spaces are supported. ``--drop-samples-after`` is an alias.
+
 Colors and per-sample styling
 -----------------------------
 

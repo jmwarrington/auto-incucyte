@@ -14,11 +14,13 @@ Directory layout
    │   ├── incucyte_plot_data.csv
    │   ├── incucyte_log2_plot_data.csv
    │   ├── normalization_audit.csv
-   │   ├── incucyte_refeed_normalized_long.csv
-   │   ├── incucyte_refeed_plot_data.csv
-   │   ├── incucyte_refeed_log2_plot_data.csv
+   │   ├── incucyte_global_normalized_long.csv
+   │   ├── incucyte_global_plot_data.csv
+   │   ├── incucyte_global_log2_plot_data.csv
+   │   ├── global_normalization_audit.csv
    │   ├── refeed_normalization_audit.csv
    │   ├── refeed_schedule_used.csv
+   │   ├── sample_removal_cutoffs_used.csv
    │   ├── plot_layout_template.csv
    │   ├── plot_layout_used.csv
    │   ├── color_mapping_metadata_template.csv
@@ -26,12 +28,13 @@ Directory layout
    └── plots/
        ├── incucyte_normalized_01_all_sequences.png
        ├── incucyte_log2_01_all_sequences.png
-       ├── incucyte_refeed_normalized_01_all_sequences.png
-       ├── incucyte_refeed_log2_01_all_sequences.png
+       ├── incucyte_global_normalized_01_all_sequences.png
+       ├── incucyte_global_log2_01_all_sequences.png
        └── plot_manifest.csv
 
-The files containing ``refeed`` are created only when ``--refeed-time`` is
-used.
+The ``global`` and ``refeed`` audit files are created only when
+``--refeed-time`` is used. The sample-removal record is created only when
+``--drop-sample-after`` is used.
 
 Raw tables
 ----------
@@ -45,35 +48,47 @@ metric before normalization.
 Normalized tables
 -----------------
 
-``incucyte_normalized_long.csv`` retains each physical well and adds its baseline
-raw value, linear fold change, and log2 fold change.
+``incucyte_normalized_long.csv`` retains each physical well and adds its
+baseline raw value, linear fold change, and log2 fold change. When refeeds are
+specified, this standard file uses the most recent segment baseline and includes
+the segment metadata.
 
 ``incucyte_plot_data.csv`` and ``incucyte_log2_plot_data.csv`` contain the exact
 mean and SEM arrays supplied to Matplotlib. Use these files for downstream
 statistics or figure reproduction.
 
-Refeed-normalized tables
-------------------------
+Global comparison and refeed records
+------------------------------------
 
-``incucyte_refeed_normalized_long.csv`` retains every physical well and adds
-``normalization_segment``, ``segment_baseline_hour``, ``refeed_event_hour``,
-``hours_since_refeed``, the raw segment baseline, and segment-local fold change.
+When ``--refeed-time`` is used, the standard normalized tables and plots are
+the refeed-normalized results. They add ``normalization_segment``,
+``segment_baseline_hour``, ``refeed_event_hour``, ``hours_since_refeed``, the
+raw segment baseline, and segment-local fold change.
 
-``incucyte_refeed_plot_data.csv`` and
-``incucyte_refeed_log2_plot_data.csv`` contain the exact segment-local mean and
-SEM values plotted. The absolute ``elapsed_hours`` column remains the x-axis.
+``incucyte_global_normalized_long.csv``, ``incucyte_global_plot_data.csv``, and
+``incucyte_global_log2_plot_data.csv`` retain the original interpretation using
+only ``--baseline-hour``. ``global_normalization_audit.csv`` verifies it.
 
 ``refeed_schedule_used.csv`` maps each entered event to the first recorded
 post-refeed image chosen as its baseline. ``refeed_normalization_audit.csv``
 shows that every individual well and plotted sample equals 1.0 at every segment
 baseline.
 
+Sample-removal record
+---------------------
+
+``sample_removal_cutoffs_used.csv`` records each sample passed to
+``--drop-sample-after``, its requested cutoff, first removed recorded hour, last
+retained hour, and number of excluded rows. The original ``incucyte_long.csv``
+continues to contain every raw measurement.
+
 Normalization audit
 -------------------
 
-``normalization_audit.csv`` gives each sample's raw baseline range, number of
-baseline replicates, per-well normalized range, plotted mean, and SEM. The
-normalized values and plotted mean must be 1.0 at baseline.
+Without refeeds, ``normalization_audit.csv`` gives each sample's raw baseline
+range, number of baseline replicates, per-well normalized range, plotted mean,
+and SEM. With refeeds, it instead audits every retained sample and segment. The
+linear values must be 1.0 at every applicable baseline.
 
 Plot manifest
 -------------
@@ -81,7 +96,8 @@ Plot manifest
 ``plot_manifest.csv`` records which samples and controls appear in each PNG, the
 plot name, color map, scale, normalization description, plotted column, first
 plotted hour, SEM setting, font sizes, legend configuration, axis widths,
-horizontal lines, dropped times, hidden samples, and style-metadata source.
+horizontal lines, dropped times, sample-removal cutoffs, hidden samples, and
+style-metadata source.
 When refeeds are used, it also records requested event times, resolved baseline
 images, marker styling, and whether lines were broken between segments.
 
