@@ -33,7 +33,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-SCRIPT_VERSION = "0.4.1"
+SCRIPT_VERSION = "0.4.2"
 PACKAGE_GITHUB_URL = "https://github.com/jmwarrington/auto-incucyte.git"
 BASELINE_ATOL = 1e-9
 NORMALIZED_COLUMN = "fold_change"
