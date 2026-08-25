@@ -225,7 +225,7 @@ def find_column_header(rows: list[list[str]], start_index: int) -> tuple[int, di
             text = clean(value)
             if text.isdigit():
                 mapping[export_column] = int(text)
-        if len(mapping) >= 6:
+        if mapping:
             return index, mapping
     raise ValueError(f"Could not locate plate column header after row {start_index + 1}")
 
